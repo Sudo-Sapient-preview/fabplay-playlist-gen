@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fabPLAY — Brand Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2/dist/chartjs-plugin-dragdata.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<script>tailwind.config={corePlugins:{preflight:false}}</script>
+</head>
+<body x-data="app()" x-init="init()" x-cloak>
+
+<div class="flex flex-col h-screen">
+<div class="flex flex-1 overflow-hidden">
+
+<!-- ══════════ SIDEBAR ══════════ -->
+<aside class="sb">
+  <div class="sb-logo" style="padding: 16px; display: flex; justify-content: center; background: white; border-bottom: 1px solid var(--bdr);">
+    <img src="/static/logo.jpg" alt="fabPLAY" style="max-height: 48px; width: auto; object-fit: contain;">
+  </div>
+
+  <nav class="sb-nav">
+    <button @click="page='dashboard'" :class="page==='dashboard'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+      Dashboard
+    </button>
+    <button @click="page='brands';loadBrands()" :class="['brands','brand-create'].includes(page)?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Brands
+      <span x-show="brands.length" x-text="brands.length" class="nav-badge"></span>
+    </button>
+    <button @click="page='soundboard';$nextTick(()=>initSbCharts())" :class="page==='soundboard'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M2 6h4M2 12h4M2 18h4"/><circle cx="10" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="10" cy="18" r="2"/><path d="M12 6h10M12 12h10M12 18h10"/></svg>
+      Sound Boards
+    </button>
+    <button @click="page='playlists'" :class="page==='playlists'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Playlists
+    </button>
+    <button @click="page='analytics'" :class="page==='analytics'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Analytics
+    </button>
+
+    <div class="sb-sep"></div>
+
+    <button @click="page='catalog'" :class="page==='catalog'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      Music Catalog
+    </button>
+    <button @click="page='settings'" :class="page==='settings'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </button>
+  </nav>
+
+  <div class="sb-footer">
+    <div class="sb-status">
+      <div class="sb-dot" :class="catalogStats.total_songs>0?'live':''"></div>
+      <span x-text="catalogStats.total_songs>0 ? catalogStats.total_songs.toLocaleString()+' songs' : 'Connecting...'"></span>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════ MAIN AREA ══════════ -->
+<div class="flex-1 flex flex-col overflow-hidden">
+<div class="flex-1 overflow-y-auto">
+
+<!-- ─── DASHBOARD ─── -->
+<div x-show="page==='dashboard'" class="fade" id="page-dashboard">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-sub">Welcome back, Jane</p>
+    </div>
+  </div>
+  <div class="px-7 py-6 space-y-6">
+    <div class="grid grid-cols-4 gap-4">
+      <div class="stat-card stat-purple">
+        <div class="stat-card-label">Total Brands</div>
+        <div class="stat-card-number" x-text="stats.total_brands??'—'"></div>
+        <div class="stat-card-icon">🏬</div>
+      </div>
+      <div class="stat-card stat-green">
+        <div class="stat-card-label">Active Sound Boards</div>
+        <div class="stat-card-number" x-text="stats.active_sound_boards??'—'"></div>
+        <div class="stat-card-icon">🎚️</div>
+      </div>
+      <div class="stat-card stat-blue">
+        <div class="stat-card-label">Playlists This Month</div>
+        <div class="stat-card-number" x-text="stats.playlists_this_month??'—'"></div>
+        <div class="stat-card-icon">🎵</div>
+      </div>
+      <div class="stat-card stat-orange">
+        <div class="stat-card-label">Avg Brand Fit Score</div>
+        <div class="stat-card-number" x-text="stats.avg_bfs?(+stats.avg_bfs).toFixed(2):'—'"></div>
+        <div class="stat-card-icon">📈</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-5">
+      <div class="col-span-2 card">
+        <div class="card-hdr"><span class="font-semibold text-sm">Recent Activity</span></div>
+        <div class="px-5 py-3 space-y-0" style="max-height:320px;overflow-y:auto">
+          <template x-if="!activity.length"><p class="text-xs text-[var(--faint)] py-8 text-center">No activity yet</p></template>
+          <template x-for="item in activity" :key="item.timestamp">
+            <div class="flex items-center gap-3 py-3" style="border-bottom:1px solid var(--bdr)">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style="background:var(--red-lite)">
+                <svg class="w-3.5 h-3.5" style="color:var(--red)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-semibold" x-text="item.event"></div>
+                <div class="text-xs text-[var(--faint)]" x-text="item.brand"></div>
+              </div>
+              <div class="text-xs text-[var(--faint)] flex-shrink-0" x-text="item.time_ago"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="font-semibold text-sm">Quick Actions</span></div>
+        <div class="p-4 space-y-2">
+          <button @click="page='brand-create'" class="qa-btn qa-primary">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Brand
+          </button>
+          <button @click="page='brands'" class="qa-btn">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            Generate Playlists
+          </button>
+          <button @click="page='soundboard'" class="qa-btn">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            Review Pending
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── BRANDS LIST ─── -->
+<div x-show="page==='brands'" class="fade" id="page-brands">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Brands</h1>
+      <p class="page-sub" x-text="brands.length+' brand'+(brands.length!==1?'s':'')"></p>
+    </div>
+    <button @click="page='brand-create'" class="btn btn-r">+ New Brand</button>
+  </div>
+  <div class="px-7 py-6 space-y-4">
+    <div class="search-box">
+      <svg class="w-4 h-4 text-[var(--faint)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" x-model="brandSearch" placeholder="Search brands..." class="search-input">
+    </div>
+    <div x-show="!brands.length" class="card py-20 text-center">
+      <div class="empty-ico">🏪</div>
+      <p class="font-semibold mt-3">No brands configured</p>
+      <p class="text-sm text-[var(--muted)] mt-1">Create a brand to start generating playlists</p>
+      <button @click="page='brand-create'" class="btn btn-r mt-5">Create Brand</button>
+    </div>
+    <div class="grid grid-cols-3 gap-4">
+      <template x-for="b in filteredBrands" :key="b.id">
+        <div class="brand-card" @click="openBrand(b.id)">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div class="brand-emoji" :style="'background:'+catColor(b.category)+'15'" x-text="catEmoji(b.category)"></div>
+              <div>
+                <div class="font-bold text-sm" x-text="b.brand_name"></div>
+                <div class="text-xs text-[var(--faint)] mt-0.5" x-text="catLabel(b.category)"></div>
+              </div>
+            </div>
+            <span class="badge" :class="b.status==='active'?'b-green':b.status==='paused'?'b-orange':'b-blue'" x-text="b.status==='active'?'Active':b.status==='paused'?'Paused':'Setup'"></span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-[var(--faint)] mt-auto pt-2" style="border-top:1px solid var(--bdr)">
+            <span x-text="(b.playlist_count||0)+' playlists'"></span>
+            <span x-text="b.last_updated?'Last: '+_timeAgo(b.last_updated):'Last: —'"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<!-- ─── CREATE NEW BRAND (5-step wizard) ─── -->
+<div x-show="page==='brand-create'" class="fade" id="page-create">
+  <div class="page-header">
+    <div class="flex items-center gap-3">
+      <button @click="page='brands'" class="btn-back">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div>
+        <h1 class="page-title">Create New Brand</h1>
+        <p class="page-sub">Step <span x-text="createStep+1"></span> of <span x-text="steps.length"></span></p>
+      </div>
+    </div>
+  </div>
+  <div class="px-7 py-6 max-w-2xl mx-auto">
+    <!-- step indicator -->
+    <div class="step-bar mb-6">
+      <template x-for="(s,i) in steps" :key="i">
+        <div class="step-item" :class="i<=createStep?'active':''">
+          <div class="step-line-bg"><div class="step-line-fill" :style="'width:'+(i<createStep?'100':i===createStep?'50':'0')+'%'"></div></div>
+          <div class="step-label" :class="i===createStep?'current':''" x-text="s"></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- STEP 0: Basic Info -->
+    <div x-show="createStep===0" class="card p-6 space-y-5">
+      <div>
+        <label class="lbl">Brand Name *</label>
+        <input type="text" x-model="form.brand_name" class="inp" placeholder="e.g., Café Bloom">
+      </div>
+      <div>
+        <label class="lbl">Business Category *</label>
+        <select x-model="form.category" class="inp sel">
+          <option value="">Select category</option>
+          <template x-for="c in cats" :key="c.v"><option :value="c.v" x-text="c.l"></option></template>
+        </select>
+      </div>
+      <div>
+        <label class="lbl">Website URL</label>
+        <input type="url" x-model="form.website_url" class="inp" placeholder="https://www.example.com">
+      </div>
+      <div>
+        <label class="lbl">Brand Description</label>
+        <textarea x-model="form.brand_description" class="inp" rows="3" placeholder="Describe your brand..."></textarea>
+      </div>
+      <div class="flex justify-between pt-2">
+        <button @click="page='brands'" class="btn btn-w">← Back</button>
+        <button @click="analyzeAndContinue()" class="btn btn-r" :disabled="!form.brand_name||!form.category||analyzing">
+          <svg x-show="analyzing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          <span x-text="analyzing?'Analyzing...':'Next →'"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 1: Brand Assets -->
+    <div x-show="createStep===1" class="card p-6 space-y-5">
+      <div>
+        <h3 class="font-bold text-base">Upload Brand Assets</h3>
+        <p class="text-xs text-[var(--muted)] mt-1">Logo, store photos, brand guidelines PDF</p>
+      </div>
+      <div class="upload-zone" @dragover.prevent="dragOver=true" @dragleave="dragOver=false" @drop.prevent="handleDrop($event)" :class="dragOver?'drag-over':''">
+        <input type="file" id="file-input" multiple accept=".png,.jpg,.jpeg,.pdf" @change="handleFiles($event)" style="display:none">
+        <label for="file-input" class="upload-label">
+          <svg class="w-10 h-10 text-[var(--faint)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M7 16l-4-4m0 0l4-4m-4 4h18"/><path d="M12 16V4m0 0L8 8m4-4l4 4" transform="rotate(90 12 12)"/></svg>
+          <p class="text-sm font-medium mt-2">Drag & drop files or click to browse</p>
+          <p class="text-xs text-[var(--faint)] mt-1">PNG, JPG, PDF up to 20MB</p>
+        </label>
+      </div>
+      <div x-show="uploadedFiles.length" class="space-y-2">
+        <template x-for="(f,i) in uploadedFiles" :key="i">
+          <div class="file-item">
+            <div class="flex items-center gap-2">
+              <span x-text="f.name.endsWith('.pdf')?'📄':'🖼️'"></span>
+              <span class="text-sm font-medium truncate" x-text="f.name"></span>
+              <span class="text-xs text-[var(--faint)]" x-text="(f.size/1024).toFixed(0)+'KB'"></span>
+            </div>
+            <button @click="uploadedFiles.splice(i,1)" class="text-[var(--faint)] hover:text-red-500">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </template>
+      </div>
+      <div x-show="analyzingAssets" class="text-xs text-[var(--muted)] text-center py-1">Analyzing brand assets with AI...</div>
+      <div class="flex justify-between pt-2">
+        <button @click="createStep--" class="btn btn-w" :disabled="analyzingAssets">← Back</button>
+        <button @click="analyzeAssetsAndContinue()" class="btn btn-r" :disabled="analyzingAssets">
+          Next →
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 2: Customer Profile -->
+    <div x-show="createStep===2" class="card p-6 space-y-6">
+      <h3 class="font-bold text-lg mb-4">Customer Profile</h3>
+
+      <!-- What do people do here -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">What do people do here?</label>
+        <p class="text-xs text-[var(--muted)] mb-2">AI suggestions — tap to select</p>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in suggestions.activities" :key="a">
+            <button type="button" @click="toggleChip(form.visitor_activity,a)"
+              :class="form.visitor_activity.includes(a)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.visitor_activity.includes(a)?'✓ ':'')+a"></button>
+          </template>
+          <span x-show="!suggestions.activities.length" class="text-xs text-[var(--faint)] italic py-1">Analyzing brand...</span>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input type="text" x-model="customActivity" @keydown.enter.prevent="addCustomTag(form.visitor_activity,suggestions.activities,'customActivity')" placeholder="Add your own..." class="flex-1 text-sm px-3 py-1.5 rounded-lg outline-none" style="border:1px solid var(--bdr);min-width:0">
+          <button type="button" @click="addCustomTag(form.visitor_activity,suggestions.activities,'customActivity')" class="chip-btn" style="white-space:nowrap">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Who walks through the door -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">Who walks through the door?</label>
+        <p class="text-xs text-[var(--muted)] mb-2">AI suggestions — tap to select</p>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="t in suggestions.customer_types" :key="t">
+            <button type="button" @click="toggleChip(form.customer_types,t)"
+              :class="form.customer_types.includes(t)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.customer_types.includes(t)?'✓ ':'')+t"></button>
+          </template>
+          <span x-show="!suggestions.customer_types.length" class="text-xs text-[var(--faint)] italic py-1">Analyzing brand...</span>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input type="text" x-model="customCustomerType" @keydown.enter.prevent="addCustomTag(form.customer_types,suggestions.customer_types,'customCustomerType')" placeholder="Add your own..." class="flex-1 text-sm px-3 py-1.5 rounded-lg outline-none" style="border:1px solid var(--bdr);min-width:0">
+          <button type="button" @click="addCustomTag(form.customer_types,suggestions.customer_types,'customCustomerType')" class="chip-btn" style="white-space:nowrap">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Spending Level -->
+      <div>
+        <label class="lbl mb-2" style="font-weight:700;color:#1A1A1A;">Spending Level *</label>
+        <div class="grid grid-cols-2 gap-3">
+          <template x-for="s in segs" :key="s.v">
+            <div @click="form.customer_segment=s.v" class="sel-card" :class="form.customer_segment===s.v?'active':''">
+              <div class="sc-title" x-text="s.l"></div>
+              <div class="sc-desc" x-text="s.d"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Age sliders -->
+      <div class="grid grid-cols-2 gap-8 pt-2">
+        <div>
+          <label class="lbl mb-3" style="font-weight:700;color:#1A1A1A;">Min Age — <span x-text="form.age_min"></span></label>
+          <div class="slider-track" style="height:6px;background:#E5E3DF;border-radius:3px">
+            <div class="slider-fill" style="background:#1D4ED8;border-radius:3px" :style="'width:'+((form.age_min-15)/(80-15))*100+'%'"></div>
+            <input type="range" min="15" max="80" x-model.number="form.age_min" class="slider-input" style="top:-5px">
+          </div>
+        </div>
+        <div>
+          <label class="lbl mb-3" style="font-weight:700;color:#1A1A1A;">Max Age — <span x-text="form.age_max"></span></label>
+          <div class="slider-track" style="height:6px;background:#E5E3DF;border-radius:3px">
+            <div class="slider-fill" style="background:#1D4ED8;border-radius:3px" :style="'width:'+((form.age_max-15)/(80-15))*100+'%'"></div>
+            <input type="range" min="15" max="80" x-model.number="form.age_max" class="slider-input" style="top:-5px">
+          </div>
+        </div>
+      </div>
+
+      <!-- Lifestyle Tags -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">Lifestyle Tags</label>
+        <p class="text-xs text-[var(--muted)] mb-2">AI suggestions — tap to select</p>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="t in suggestions.lifestyle" :key="t">
+            <button type="button" @click="toggleChip(form.lifestyle_tags,t)"
+              :class="form.lifestyle_tags.includes(t)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.lifestyle_tags.includes(t)?'✓ ':'')+t"></button>
+          </template>
+          <span x-show="!suggestions.lifestyle.length" class="text-xs text-[var(--faint)] italic py-1">Analyzing brand...</span>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input type="text" x-model="customLifestyle" @keydown.enter.prevent="addCustomTag(form.lifestyle_tags,suggestions.lifestyle,'customLifestyle')" placeholder="Add your own..." class="flex-1 text-sm px-3 py-1.5 rounded-lg outline-none" style="border:1px solid var(--bdr);min-width:0">
+          <button type="button" @click="addCustomTag(form.lifestyle_tags,suggestions.lifestyle,'customLifestyle')" class="chip-btn" style="white-space:nowrap">+ Add</button>
+        </div>
+      </div>
+
+      <div class="flex justify-between pt-6">
+        <button @click="createStep--" class="btn btn-w">← Back</button>
+        <button @click="createStep++" class="btn btn-r">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: Music Preferences -->
+    <div x-show="createStep===3" class="card p-6 space-y-5">
+      <h3 class="font-bold">Music Preferences</h3>
+      <div>
+        <label class="lbl mb-2">Must-Include Genres</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="g in allGenres.filter(g=>!form.exclude_genres.includes(g))" :key="g">
+            <button type="button" @click="toggleGenre('include_genres',g,form)" :class="form.include_genres.includes(g)?'genre-btn active-include':'genre-btn'" x-text="g"></button>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label class="lbl mb-2">Must-Exclude Genres</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="g in allGenres.filter(g=>!form.include_genres.includes(g))" :key="g">
+            <button type="button" @click="toggleGenre('exclude_genres',g,form)" :class="form.exclude_genres.includes(g)?'genre-btn active-exclude':'genre-btn'" x-text="g"></button>
+          </template>
+        </div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-lg" style="border:1px solid var(--bdr)">
+        <div>
+          <div class="text-sm font-semibold">Filter Explicit Content</div>
+          <div class="text-[11px] text-[var(--faint)]">Remove explicit tracks</div>
+        </div>
+        <label class="tog"><input type="checkbox" x-model="form.filter_explicit"><span class="tog-sl"></span></label>
+      </div>
+      <div>
+        <label class="lbl">Additional Music Notes</label>
+        <textarea x-model="form.music_notes" class="inp" rows="2" placeholder="e.g. keep it upbeat after 6pm..."></textarea>
+      </div>
+      <div class="flex justify-between pt-2">
+        <button @click="createStep--" class="btn btn-w">← Back</button>
+        <button @click="createStep++" class="btn btn-r">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: Review -->
+    <div x-show="createStep===4" class="card p-6 space-y-5">
+      <h3 class="font-bold">Review Your Brand</h3>
+      <div class="review-table">
+        <div class="review-row"><span class="review-label">Brand Name</span><span class="review-val" x-text="form.brand_name||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Category</span><span class="review-val" x-text="catLabel(form.category)||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Website</span><span class="review-val" x-text="form.website_url||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Assets</span><span class="review-val" x-text="uploadedFiles.length?uploadedFiles.length+' file(s)':'None'"></span></div>
+        <div class="review-row"><span class="review-label">Include Genres</span><span class="review-val" x-text="form.include_genres.join(', ')||'None'"></span></div>
+        <div class="review-row"><span class="review-label">Exclude Genres</span><span class="review-val" x-text="form.exclude_genres.join(', ')||'None'"></span></div>
+        <div class="review-row"><span class="review-label">Explicit Filter</span><span class="review-val" x-text="form.filter_explicit?'On':'Off'"></span></div>
+      </div>
+      <div class="flex justify-between pt-2">
+        <button @click="createStep--" class="btn btn-w">← Back</button>
+        <button @click="submitBrand()" class="btn btn-green" :disabled="submitting">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span x-text="submitting?'Creating...':'Create & Generate Sound Board'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SOUND BOARD DETAIL ─── -->
+<div x-show="page==='soundboard'" class="fade" id="page-soundboard">
+  <div class="page-header">
+    <div class="flex items-center gap-3">
+      <button @click="page='brands'" class="btn-back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="page-title" x-text="curBrand?.brand_name||'Sound Board'"></h1>
+          <span class="badge b-green" x-show="curBrand?.status==='active'">Active</span>
+        </div>
+        <p class="page-sub" x-text="curPl?.sound_board?'Brand intelligence & sound board':'Playlist not generated yet'"></p>
+      </div>
+    </div>
+    <div class="flex gap-2" x-show="curBrand">
+      <button @click="generateSoundboard(curBrand?.id)" class="btn btn-r">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Regenerate Storyboard
+      </button>
+    </div>
+  </div>
+  <div class="px-7 py-6 space-y-5" x-show="curPl || curBrand?.sound_board_result">
+    <!-- Brand identity card -->
+    <div class="card p-6">
+      <div class="flex items-start gap-6">
+        <div class="flex-1">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="brand-emoji-lg" :style="'background:'+catColor(curBrand?.category)+'15'" x-text="catEmoji(curBrand?.category)"></div>
+            <div>
+              <h2 class="text-xl font-bold" x-text="curBrand?.brand_name"></h2>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="badge b-blue" x-text="catLabel(curBrand?.category)"></span>
+                <span class="badge" :class="curBrand?.status==='active'?'b-green':'b-blue'" x-text="curBrand?.status==='active'?'Active':'Setup'"></span>
+              </div>
+            </div>
+          </div>
+          <p class="text-sm italic text-[var(--muted)] mb-3" x-text="'&quot;'+(curPl?.brand_profile?.brand_summary||curPl?.sound_board?.brand_summary||curBrand?.brand_profile?.brand_summary||'')+'&quot;'"></p>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="adj in (curPl?.brand_profile?.brand_adjectives||curBrand?.brand_profile?.brand_adjectives||[])" :key="adj">
+              <span class="adj-pill" x-text="adj"></span>
+            </template>
+          </div>
+        </div>
+        <div style="width:200px;flex-shrink:0;cursor:pointer;transition:opacity 0.2s;" class="hover:opacity-75 text-center" @click="showRadarModal=true; $nextTick(() => initSbChartsModal())" title="Click to enlarge">
+          <canvas id="sb-radar" width="200" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio Parameters -->
+    <div class="card p-6">
+      <h3 class="font-bold mb-5">Acoustic Design Elements</h3>
+      <div class="grid grid-cols-2 gap-x-10 gap-y-2">
+        <template x-for="p in sbAudioParams()" :key="p.label">
+          <div class="audio-param-row">
+            <div class="audio-param-header">
+              <span class="audio-param-label" x-text="p.left + ' → ' + p.right"></span>
+              <div class="audio-param-value-group">
+                <span class="audio-param-value" x-text="p.display"></span>
+                <button class="audio-param-reset" @click="resetTarget(p)" title="Reset to AI suggestion">↻</button>
+              </div>
+            </div>
+            <div class="slider-track">
+              <!-- Pink AI-suggested range band: from min to max -->
+              <div class="slider-range"
+                :style="p.key==='tempo'
+                  ? `left:${((p.min-60)/120)*100}%;width:${((p.max-p.min)/120)*100}%`
+                  : `left:${p.min*100}%;width:${(p.max-p.min)*100}%`">
+              </div>
+              <!-- Red fill bar from 0 to target -->
+              <div class="slider-fill" :style="'width:'+p.pct+'%'"></div>
+              <!-- Draggable range input -->
+              <input type="range" class="slider-input"
+                :min="p.key==='tempo'?60:0"
+                :max="p.key==='tempo'?180:1"
+                :step="p.key==='tempo'?1:0.01"
+                :value="p.target"
+                @input="updateTarget(p,$event.target.value)">
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Genre & Style -->
+    <div class="card p-6">
+      <h3 class="font-bold mb-3">Genre & Style</h3>
+      <p class="text-xs text-[var(--muted)] mb-3">Primary Genres <span class="font-normal">(click to include/exclude)</span></p>
+      <div class="flex flex-wrap gap-2">
+        <template x-for="g in sbAllGenres()" :key="g">
+          <button type="button" @click="toggleSbGenre(g)" :class="sbExcluded(g)?'genre-btn active-exclude':(sbIncluded(g)?'genre-btn active-include':'genre-btn')" x-text="(sbIncluded(g)?'✓ ':'')+g"></button>
+        </template>
+        <!-- Add genre button -->
+        <div class="relative" x-data>
+          <button type="button" @click="sbShowAddGenre=!sbShowAddGenre" class="btn btn-r" style="padding:4px 12px;font-size:12px;height:32px;line-height:1">+ Add</button>
+          <div x-show="sbShowAddGenre" @click.outside="sbShowAddGenre=false" class="absolute z-50 mt-1 bg-white border border-[var(--bdr)] rounded-xl shadow-lg p-3" style="min-width:300px;max-height:320px;overflow-y:auto;left:0;top:100%">
+            <!-- Include section -->
+            <p class="text-xs font-semibold mb-2" style="color:var(--blue)">+ Include</p>
+            <div class="flex flex-wrap gap-1.5 mb-3">
+              <template x-for="g in allGenres.filter(g=>!sbAllGenres().includes(g))" :key="g">
+                <button type="button" @click="sbGenreOverrides.include=[...sbGenreOverrides.include,g];_saveGenreOverrides();sbShowAddGenre=false" class="genre-btn active-include" x-text="g"></button>
+              </template>
+              <p x-show="allGenres.filter(g=>!sbAllGenres().includes(g)).length===0" class="text-xs text-[var(--faint)]">All genres already listed</p>
+            </div>
+            <!-- Exclude section -->
+            <div class="border-t border-[var(--bdr)] pt-2 mt-1">
+              <p class="text-xs font-semibold mb-2" style="color:var(--red)">— Exclude</p>
+              <div class="flex flex-wrap gap-1.5">
+                <template x-for="g in allGenres.filter(g=>!sbAllGenres().includes(g))" :key="g">
+                  <button type="button" @click="sbGenreOverrides.exclude=[...sbGenreOverrides.exclude,g];_saveGenreOverrides();sbShowAddGenre=false" class="genre-btn active-exclude" x-text="g"></button>
+                </template>
+                <p x-show="allGenres.filter(g=>!sbAllGenres().includes(g)).length===0" class="text-xs text-[var(--faint)]">All genres already listed</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day-Part Timeline -->
+    <div class="card p-6">
+      <h3 class="font-bold mb-4">Day-Part Timeline</h3>
+      <div class="flex rounded-lg overflow-hidden mb-3" style="height:44px">
+        <template x-for="(dp,i) in (curBrand?.sound_board_result?.day_parts||[])" :key="i">
+          <div class="flex-1 flex flex-col items-center justify-center text-white text-[10px] font-semibold" :style="'background:'+dpColor(i)">
+            <span x-text="dp.name"></span>
+            <span class="opacity-70 font-normal" x-text="dp.start_time+'–'+dp.end_time"></span>
+          </div>
+        </template>
+      </div>
+      <div style="position:relative;height:160px;width:100%"><canvas id="sb-timeline"></canvas></div>
+    </div>
+
+    <div class="flex justify-end">
+      <button @click="generatePlaylist(curBrand?.id)" class="btn btn-r" x-show="!curPl">Generate Playlists →</button>
+      <button @click="page='playlists'" class="btn btn-r" x-show="curPl">View Day-Part Playlists →</button>
+    </div>
+  </div>
+  <div x-show="!curPl && !curBrand?.sound_board_result" class="p-16 text-center">
+    <div class="empty-ico">🎚️</div>
+    <p class="font-semibold mt-3">No sound board generated yet</p>
+    <p class="text-sm text-[var(--muted)] mt-1">Create a brand to see its sound board</p>
+  </div>
+</div>
+
+<!-- ─── PLAYLISTS ─── -->
+<div x-show="page==='playlists'" class="fade" id="page-playlists">
+  <div class="page-header">
+    <div class="flex items-center gap-3">
+      <button @click="page='soundboard'" class="btn-back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div>
+        <h1 class="page-title">Day-Part Playlists</h1>
+        <p class="page-sub" x-text="(curBrand?.brand_name||'')+(curPl?.day_parts?.length?' — '+curPl.day_parts.length+' time slots':'')"></p>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button @click="generatePlaylist(curBrand?.id)" class="btn btn-w">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Regenerate Playlist
+      </button>
+    </div>
+  </div>
+  <div class="px-7 py-6" x-show="curPl?.day_parts?.length">
+    <div class="flex gap-1 overflow-x-auto pb-2 mb-5">
+      <template x-for="(dp,i) in (curPl?.day_parts??[])" :key="i">
+        <button @click="activeDp=i" class="dp-tab" :class="activeDp===i?'on':''">
+          <span x-text="dp.name"></span>
+          <span class="opacity-55 ml-1 text-[10px]" x-text="dp.start_time+'–'+dp.end_time"></span>
+        </button>
+      </template>
+    </div>
+    <template x-if="curPl?.day_parts?.[activeDp]">
+      <div class="fade space-y-4">
+        <div class="grid grid-cols-6 gap-3">
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="curPl.day_parts[activeDp].track_count"></div><div class="text-[10px] text-[var(--faint)]">tracks</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="Math.round((curPl.day_parts[activeDp].total_duration_seconds||0)/60)+'m'"></div><div class="text-[10px] text-[var(--faint)]">duration</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" :class="(curPl.day_parts[activeDp].avg_bfs||0)>=.75?'text-emerald-600':(curPl.day_parts[activeDp].avg_bfs||0)>=.5?'text-amber-500':'text-red-500'" x-text="(curPl.day_parts[activeDp].avg_bfs||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg BFS</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg text-purple-600" x-text="(curPl.day_parts[activeDp].avg_mmr||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg MMR</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].energy_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">energy</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].tempo_target||0)+' BPM'"></div><div class="text-[10px] text-[var(--faint)]">tempo</div></div>
+        </div>
+        <div class="card-sm px-4 py-3"><p class="text-sm text-[var(--muted)] italic" x-text="curPl.day_parts[activeDp].character_description||'—'"></p></div>
+        <div class="card overflow-hidden">
+          <div class="tr bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:28px 30px 1fr 150px 110px 58px 56px 56px;border-bottom:1px solid var(--bdr);cursor:default">
+            <span></span><span>#</span><span>Title</span><span>Artist</span><span>Genre</span><span class="text-right">BPM</span><span class="text-right">BFS</span><span class="text-right">MMR</span>
+          </div>
+          <template x-for="(t,ti) in (curPl.day_parts[activeDp].tracks??[])" :key="ti">
+            <div class="tr" :class="npTrackKey===ti+'-'+activeDp?'playing':''" style="grid-template-columns:28px 30px 1fr 150px 110px 58px 56px 56px">
+              <div class="flex items-center justify-center" @click.stop>
+                <input type="checkbox" :checked="isApproved(activeDp,ti)" @change="toggleApprove(activeDp,ti)" class="w-3.5 h-3.5 cursor-pointer accent-[var(--red)]">
+              </div>
+              <span class="tr-num text-[11px] text-[var(--faint)]" x-text="ti+1"></span>
+              <!-- Title column with inline play/pause -->
+              <div class="flex items-center gap-1.5 min-w-0" @click.stop>
+                <button @click="npTrackKey===ti+'-'+activeDp ? togglePlay() : playTrack(t,ti,activeDp)"
+                        class="flex-shrink-0 transition-colors bg-transparent border-0 p-0 cursor-pointer outline-none"
+                        :class="npTrackKey===ti+'-'+activeDp?'text-[var(--red)]':'text-[var(--faint)] hover:text-[var(--txt)]'">
+                  <svg x-show="!(npTrackKey===ti+'-'+activeDp && npPlaying)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+                  <svg x-show="npTrackKey===ti+'-'+activeDp && npPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                </button>
+                <span class="font-medium text-xs truncate" x-text="t.title||'Unknown'"></span>
+              </div>
+              <span class="text-xs text-[var(--faint)] truncate" x-text="t.artist||'—'"></span>
+              <span class="text-xs text-[var(--faint)] truncate" x-text="t.genre||'—'"></span>
+              <span class="text-xs text-right text-[var(--faint)]" x-text="t.bpm||'—'"></span>
+              <span class="text-xs text-right font-bold" :class="t.bfs>=.75?'text-emerald-600':t.bfs>=.5?'text-amber-500':'text-red-500'" x-text="(t.bfs||0).toFixed(3)"></span>
+              <span class="text-xs text-right font-bold text-purple-600" x-text="(t.mmr_score||0).toFixed(3)"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+  <div x-show="!curPl?.day_parts?.length" class="p-16 text-center">
+    <div class="empty-ico">🎵</div>
+    <p class="font-semibold mt-3">No playlists yet</p>
+    <button @click="generatePlaylist(curBrand?.id)" class="btn btn-r mt-4">Generate Now</button>
+  </div>
+</div>
+
+<!-- ─── ANALYTICS ─── -->
+<div x-show="page==='analytics'" class="fade">
+  <div class="page-header"><div><h1 class="page-title">Analytics</h1><p class="page-sub">Brand perception & soundtrack fit</p></div></div>
+  <div class="px-7 py-6"><div class="card p-16 text-center"><div class="empty-ico">📊</div><p class="font-semibold mt-3">Analytics coming soon</p><p class="text-sm text-[var(--muted)] mt-1">Brand perception vs soundtrack fit charts will appear here</p></div></div>
+</div>
+
+<!-- ─── CATALOG ─── -->
+<div x-show="page==='catalog'" class="fade">
+  <div class="page-header">
+    <div><h1 class="page-title">Music Catalog</h1><p class="page-sub" x-text="catalogStats.total_songs?catalogStats.total_songs.toLocaleString()+' songs in database':'Loading...'"></p></div>
+    <button @click="loadCatalog()" class="btn btn-w">Refresh</button>
+  </div>
+  <div class="px-7 py-6">
+    <div class="grid grid-cols-3 gap-4 mb-5">
+      <div class="card p-5"><div class="stat-n" x-text="catalogStats.total_songs?.toLocaleString()??'—'"></div><div class="stat-l">total songs</div></div>
+      <div class="card p-5"><div class="stat-n text-blue-600">Supabase</div><div class="stat-l">database</div></div>
+      <div class="card p-5"><div class="stat-n" :class="catalogStats.total_songs>0?'text-emerald-600':'text-amber-500'" x-text="catalogStats.total_songs>0?'Live':'Connecting'"></div><div class="stat-l">status</div></div>
+    </div>
+    <div class="card overflow-hidden">
+      <div class="card-hdr"><span class="font-semibold text-sm">Sample Tracks</span><span class="text-xs text-[var(--faint)]">First 50</span></div>
+      <div x-show="!catalogSongs.length" class="py-10 text-center"><button @click="loadCatalog()" class="btn btn-w">Load preview</button></div>
+      <div x-show="catalogSongs.length">
+        <div class="tr bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:1fr 150px 110px 55px 55px 55px 55px;border-bottom:1px solid var(--bdr);cursor:default">
+          <span>Title</span><span>Artist</span><span>Genre</span><span class="text-right">BPM</span><span class="text-right">Energy</span><span class="text-right">Valence</span><span class="text-right">Dance</span>
+        </div>
+        <template x-for="s in catalogSongs" :key="s.id">
+          <div class="tr" style="grid-template-columns:1fr 150px 110px 55px 55px 55px 55px;cursor:default">
+            <span class="text-xs font-medium truncate" x-text="(s.title||s.name||'—').split('_')[0].trim()"></span>
+            <span class="text-xs text-[var(--faint)] truncate" x-text="s.artist||'—'"></span>
+            <span class="text-xs text-[var(--faint)] truncate" x-text="s.genre||'—'"></span>
+            <span class="text-xs text-right text-[var(--faint)]" x-text="Math.round(s.tempo_bpm||s.tempo||0)||'—'"></span>
+            <span class="text-xs text-right" x-text="(s.energy||0).toFixed(2)"></span>
+            <span class="text-xs text-right" x-text="(s.valence||0).toFixed(2)"></span>
+            <span class="text-xs text-right" x-text="(s.danceability||0).toFixed(2)"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SETTINGS ─── -->
+<div x-show="page==='settings'" class="fade">
+  <div class="page-header"><div><h1 class="page-title">Settings</h1><p class="page-sub">Application configuration</p></div></div>
+  <div class="px-7 py-6"><div class="card p-16 text-center"><div class="empty-ico">⚙️</div><p class="font-semibold mt-3">Settings coming soon</p></div></div>
+</div>
+
+</div><!-- /scroll area -->
+
+<!-- ══════════ NOW PLAYING BAR ══════════ -->
+<div class="np-bar" x-show="!!npTitle" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0">
+  <div class="np-dot" :class="npPlaying?'':'idle'"></div>
+  <div class="np-wave" :class="npPlaying?'':'paused'"><span></span><span></span><span></span><span></span></div>
+  <div class="np-timeline min-w-0 flex-1">
+    <div class="np-title" x-text="npTitle||'Nothing playing'"></div>
+    <div class="np-artist" x-text="npArtist||'Select a track from any playlist'"></div>
+    <div class="np-scrub">
+      <span class="np-time" x-text="fmtTime(npCurrent)"></span>
+      <input type="range" class="scrub" x-ref="scrub" min="0" :max="npDuration||100" value="0" @input="seekTo($event.target.value)">
+      <span class="np-time" x-text="fmtTime(npDuration)"></span>
+    </div>
+  </div>
+  <div class="np-ctrl flex items-center gap-1 flex-shrink-0">
+    <button @click="prevTrack()"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+    <button @click="togglePlay()" class="w-9 h-9 rounded-full flex items-center justify-center" style="background:var(--red)">
+      <svg x-show="!npPlaying" class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <svg x-show="npPlaying" class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+    </button>
+    <button @click="nextTrack()"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+  </div>
+  <div class="np-vol flex-shrink-0">
+    <svg class="w-4 h-4" style="color:rgba(255,255,255,.4)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+    <input type="range" min="0" max="1" step="0.05" value="0.8" @input="setVolume($event.target.value)" style="width:72px;accent-color:var(--red);cursor:pointer">
+  </div>
+</div>
+
+</div><!-- /main col -->
+</div><!-- /flex row -->
+</div><!-- /shell -->
+
+<!-- ══════════ GENERATION MODAL ══════════ -->
+<div x-show="showGen" class="modal-bg" x-cloak>
+  <div class="modal-box p-6 space-y-4">
+    <h3 class="font-bold text-lg" x-text="genTask?.status==='done'?'✅ Generation Complete':genTask?.status==='error'?'❌ Error':(genMode==='soundboard'?'⏳ Generating Sound Board...':'⏳ Generating Playlists...')"></h3>
+    <div class="pb-outer"><div class="pb-inner" :style="'width:'+Math.max(4,genTask?.progress||0)+'%'"></div></div>
+    <div class="term" id="gen-log">
+      <template x-for="ln in (genTask?.log||[])" :key="ln"><div x-text="'› '+ln"></div></template>
+    </div>
+    <div x-show="genTask?.status==='error'" class="text-sm text-red-600 font-medium" x-text="genTask?.error"></div>
+    <div class="flex justify-end gap-2" x-show="genTask?.status==='done'||genTask?.status==='error'">
+      <button @click="showGen=false;genTask=null" class="btn btn-w">Close</button>
+      <button x-show="genTask?.status==='done' && genMode==='soundboard'" @click="showGen=false;genTask=null;page='soundboard'" class="btn btn-r">View Sound Board →</button>
+      <button x-show="genTask?.status==='done' && genMode==='playlist'" @click="showGen=false;genTask=null;page='playlists'" class="btn btn-r">View Playlists →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ RADAR PREVIEW MODAL ══════════ -->
+<div x-show="showRadarModal" class="modal-bg flex items-center justify-center fixed inset-0 bg-black/50 z-50" x-cloak style="z-index: 100;">
+  <div class="modal-box p-6 space-y-4" style="width: 460px; max-width: 92vw; background: white; border-radius: 12px; position: relative;">
+    <button @click="showRadarModal=false; if(sbCharts.radarLg){sbCharts.radarLg.destroy();sbCharts.radarLg=null}" style="position: absolute; top: 16px; right: 16px; background: transparent; border: none; font-size: 20px; cursor: pointer; color: #888;">✕</button>
+    <div class="text-center mb-1">
+      <h3 class="font-bold text-lg" x-text="(curBrand?.brand_name||'Brand') + ' Identity'"></h3>
+    </div>
+    <div style="display: flex; justify-content: center; align-items: center; overflow: hidden;">
+      <canvas id="sb-radar-lg" style="display:block;max-width:380px;max-height:380px;"></canvas>
+    </div>
+    <p class="text-center text-xs font-semibold uppercase tracking-widest mt-2" style="color:var(--muted);letter-spacing:.1em;">Aaker's Brand Personality Dimensions</p>
+  </div>
+</div>
+
+<script src="/static/app.js?v=3"></script>
+</body>
+</html>

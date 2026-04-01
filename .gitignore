@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+brands_store.json
+playlists_store.json
+songs_manifest.json
+*.mp3

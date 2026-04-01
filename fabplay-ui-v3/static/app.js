@@ -1,0 +1,721 @@
+/* ══════════ fabPLAY UI v2 — App Logic ══════════ */
+function app() {
+return {
+  page: 'dashboard',
+  brands: [],
+  stats: {},
+  activity: [],
+  catalogStats: {},
+  catalogSongs: [],
+  curBrand: null,
+  curPl: null,
+  brandSearch: '',
+  createStep: 0,
+  steps: ['Basic Info','Brand Assets','Customer Profile','Music Preferences','Review'],
+  analyzing: false,
+  analyzingAssets: false,
+  assetAnalysis: '',
+  submitting: false,
+  uploadedFiles: [],
+  dragOver: false,
+  activeDp: 0,
+  showGen: false,
+  showRadarModal: false,
+  genMode: '',
+  genTask: null,
+  genInterval: null,
+  sbTask: null,
+  sbInterval: null,
+  sbCharts: {radar:null, timeline:null, radarLg:null},
+  sbGenreOverrides: {include:[], exclude:[]},
+  sbShowAddGenre: false,
+  _sbSaveTimer: null,
+  _dpSaveTimer: null,
+  _profileSaveTimer: null,
+  _origTargets: {},      // keyed by param.key, stores original AI midpoints
+  _origRanges: {},       // keyed by param.key, stores frozen AI {min,max} for the pink band
+  suggestions: {activities:[], lifestyle:[], customer_types:[]},
+  customActivity: '',
+  customCustomerType: '',
+  customLifestyle: '',
+
+  // Player state
+  player: null,
+  npTitle: '',
+  npArtist: '',
+  npPlaying: false,
+  npCurrent: 0,
+  npDuration: 0,
+  npTrackKey: '',
+  npQueue: [],
+  npQueueIdx: 0,
+
+  // Approval state: keyed by "dpIdx-trackIdx"
+  approvedTracks: {},
+
+  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''},
+
+  cats: [
+    {v:'cafe',l:'☕ Café / Coffee'},{v:'qsr',l:'🍔 QSR / Fast Food'},{v:'fine_dine',l:'🍽️ Fine Dining'},
+    {v:'casual_dine',l:'🍽️ Casual Dining'},{v:'fashion_footwear',l:'👟 Fashion / Footwear'},
+    {v:'jewelry',l:'💎 Jewelry'},{v:'supermarket',l:'🛒 Supermarket'},{v:'hotel',l:'🏨 Hotel'},
+    {v:'mall',l:'🏬 Mall'},{v:'spa',l:'🧘 Spa / Wellness'},{v:'gym',l:'💪 Gym / Fitness'},
+    {v:'salon',l:'✂️ Salon'},{v:'bookstore',l:'📚 Bookstore'},{v:'electronics',l:'💻 Electronics'},
+    {v:'kids_store',l:'🧸 Kids Store'},{v:'bar_lounge',l:'🍸 Bar / Lounge'},
+    {v:'clinic',l:'🏥 Clinic'},{v:'coworking',l:'💼 Coworking'},{v:'furniture',l:'🛋️ Furniture'},
+    {v:'footwear',l:'👟 Footwear'}
+  ],
+
+  segs: [
+    {v:'budget',l:'Value',d:'Budget-friendly'},
+    {v:'mid_range',l:'Mid-range',d:'Moderate pricing'},
+    {v:'premium',l:'Premium',d:'Higher-end experience'},
+    {v:'luxury',l:'Luxury',d:'Ultra-premium'}
+  ],
+
+  allGenres: ['Pop','House','Chillout','Indie','Lounge','Afro Pop','Dance','Rock','Europop','Ambient','Orchestral','Electronic','Electropop','Deep House','Jazz','Diwali / Festive','Tropical House','Folk','Blues','Bollywood','Soul','Trance','R&B','Wedding','Carnatic Classical','Indian Classical','Hip Hop','Christmas','Funk','Indie Rock','Indie Pop'],
+
+  spParams: [
+    {k:'energy_target',l:'Energy',c:'#EF4444',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'valence_target',l:'Valence',c:'#3B82F6',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'tempo_target',l:'Tempo',c:'#F59E0B',fmt:v=>Math.round(v)+' BPM',pct:v=>((v-60)/120)*100},
+    {k:'danceability_target',l:'Danceability',c:'#10B981',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'acousticness_target',l:'Acousticness',c:'#8B5CF6',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'instrumentalness_target',l:'Instrumentalness',c:'#EC4899',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'loudness_target',l:'Loudness',c:'#F97316',fmt:v=>v.toFixed(2),pct:v=>v*100},
+    {k:'speechiness_target',l:'Speechiness',c:'#06B6D4',fmt:v=>v.toFixed(2),pct:v=>v*100},
+  ],
+
+  async init(){
+    this.player = new Audio();
+    this._bindPlayer();
+    await Promise.all([this.loadStats(), this.loadBrands(), this.loadActivity(), this.loadCatalogStats()]);
+    this.$watch('page', async val => {
+      if(val==='soundboard' && this.curBrand && !this.curBrand.sound_board_result){
+        await this.loadBrands();
+        const b=this.brands.find(x=>x.id===this.curBrand.id);
+        if(b)this.curBrand=b;
+        this.$nextTick(()=>this.initSbCharts());
+      }
+      if(val==='playlists' && this.curBrand && !this.curPl){
+        try{const r=await fetch('/api/playlists/'+this.curBrand.id);if(r.ok)this.curPl=await r.json()}catch(e){}
+      }
+    });
+  },
+
+  async loadStats(){ try{ const r=await fetch('/api/stats'); if(r.ok)this.stats=await r.json() }catch(e){} },
+  async loadBrands(){ try{ const r=await fetch('/api/brands'); if(r.ok)this.brands=await r.json() }catch(e){} },
+  async loadActivity(){ try{ const r=await fetch('/api/activity'); if(r.ok)this.activity=await r.json() }catch(e){} },
+  async loadCatalogStats(){ try{ const r=await fetch('/api/catalog/stats'); if(r.ok)this.catalogStats=await r.json() }catch(e){} },
+  async loadCatalog(){
+    try{
+      const [s,songs]=await Promise.all([fetch('/api/catalog/stats'),fetch('/api/catalog/songs')]);
+      if(s.ok)this.catalogStats=await s.json();
+      if(songs.ok){const d=await songs.json();this.catalogSongs=d.songs||[]}
+    }catch(e){}
+  },
+
+  get filteredBrands(){
+    if(!this.brandSearch) return this.brands;
+    const q=this.brandSearch.toLowerCase();
+    return this.brands.filter(b=>(b.brand_name||'').toLowerCase().includes(q)||(b.category||'').toLowerCase().includes(q));
+  },
+
+  async openBrand(id){
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    try{const r=await fetch('/api/playlists/'+id);if(r.ok)this.curPl=await r.json();else this.curPl=null}catch(e){this.curPl=null}
+    this.activeDp=0;
+    const saved=localStorage.getItem('sbGenreOverrides_'+id);
+    this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
+    this._origTargets={};   // reset so ranges re-freeze for new brand
+    this._origRanges={};
+    this.page='soundboard';
+    this.$nextTick(()=>this.initSbCharts());
+  },
+
+  _saveGenreOverrides(){
+    if(this.curBrand?.id)
+      localStorage.setItem('sbGenreOverrides_'+this.curBrand.id, JSON.stringify(this.sbGenreOverrides));
+  },
+
+  // ── File upload ────────────────────────────
+  handleFiles(e){
+    const files=[...e.target.files];
+    files.forEach(f=>{if(this._validFile(f))this.uploadedFiles.push(f)});
+    e.target.value='';
+  },
+  handleDrop(e){
+    this.dragOver=false;
+    const files=[...e.dataTransfer.files];
+    files.forEach(f=>{if(this._validFile(f))this.uploadedFiles.push(f)});
+  },
+  _validFile(f){
+    const ok=['image/png','image/jpeg','image/jpg','application/pdf'];
+    return ok.includes(f.type)&&f.size<=20*1024*1024;
+  },
+
+  // ── Brand creation ─────────────────────────
+  async analyzeAndContinue(){
+    this.analyzing=true;
+    try{
+      const r=await fetch('/api/quick-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand_name:this.form.brand_name,website_url:this.form.website_url,category:this.form.category})});
+      if(r.ok){
+        const s=await r.json();
+        if(s.customer_segment)this.form.customer_segment=s.customer_segment;
+        if(s.age_min)this.form.age_min=s.age_min;
+        if(s.age_max)this.form.age_max=s.age_max;
+        if(s.brand_description&&!this.form.brand_description)this.form.brand_description=s.brand_description;
+        this.suggestions.activities=s.suggested_activities||[];
+        this.suggestions.customer_types=s.suggested_customer_types||[];
+        this.suggestions.lifestyle=s.suggested_lifestyle||[];
+        // Pre-select all suggestions — user can deselect individually
+        this.form.visitor_activity=[...this.suggestions.activities];
+        this.form.customer_types=[...this.suggestions.customer_types];
+        this.form.lifestyle_tags=[...this.suggestions.lifestyle];
+      }
+    }catch(e){}
+    finally{this.analyzing=false;this.createStep++}
+  },
+
+  async analyzeAssetsAndContinue(){
+    if(!this.uploadedFiles.length){this.createStep++;return}
+    this.analyzingAssets=true;
+    try{
+      const fd=new FormData();
+      this.uploadedFiles.forEach(f=>fd.append('files',f));
+      const r=await fetch('/api/analyze-assets-preview',{method:'POST',body:fd});
+      if(r.ok){
+        const data=await r.json();
+        this.assetAnalysis=data.asset_analysis||'';
+        const knownLower=this.allGenres.map(g=>g.toLowerCase());
+        if(data.recommended_genres?.length){data.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
+        if(data.avoid_genres?.length){data.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
+        if(data.music_notes&&!this.form.music_notes)this.form.music_notes=data.music_notes;
+      } else {
+        const txt=await r.text().catch(()=>'');
+        console.error('Asset analysis failed:',r.status,txt);
+      }
+    }catch(e){console.error('Asset analysis error:',e)}
+    finally{this.analyzingAssets=false;this.createStep++}
+  },
+
+  addCustomTag(arr, suggestionsArr, inputKey){
+    const v=this[inputKey].trim();
+    if(!v)return;
+    if(!suggestionsArr.includes(v))suggestionsArr.push(v);
+    if(!arr.includes(v))arr.push(v);
+    this[inputKey]='';
+  },
+
+  toggleGenre(field,genre,target){const arr=target[field];const idx=arr.indexOf(genre);if(idx>=0)arr.splice(idx,1);else arr.push(genre)},
+  toggleChip(arr,v){const i=arr.indexOf(v);if(i>=0)arr.splice(i,1);else arr.push(v)},
+
+  async submitBrand(){
+    this.submitting=true;
+    try{
+      const body={...this.form,customer_description:this.form.customer_types.length?this.form.customer_types.join(', '):this.form.customer_description,asset_analysis:this.assetAnalysis};
+      const r=await fetch('/api/brands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok)throw new Error('Failed');
+      const brand=await r.json();
+      // Upload files only if asset analysis wasn't already done in step 1
+      if(this.uploadedFiles.length&&!this.assetAnalysis){
+        const fd=new FormData();
+        this.uploadedFiles.forEach(f=>fd.append('files',f));
+        await fetch('/api/brands/'+brand.id+'/assets',{method:'POST',body:fd});
+      }
+      await this.loadBrands();
+      this.curBrand=brand;this.curPl=null;this._origRanges={};this._origTargets={};
+      this._resetForm();
+      this.page='soundboard';
+      this.generateSoundboard(brand.id);
+    }catch(e){alert('Error: '+e.message)}
+    finally{this.submitting=false}
+  },
+
+  _resetForm(){
+    this.createStep=0;
+    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''};
+    this.suggestions={activities:[],lifestyle:[],customer_types:[]};
+    this.uploadedFiles=[];
+    this.assetAnalysis='';
+    this.analyzingAssets=false;
+    this.customActivity='';this.customCustomerType='';this.customLifestyle='';
+  },
+
+  // ── Generation ─────────────────────────────
+  async generateSoundboard(id){
+    if(!id)return;
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    try{
+      const r=await fetch('/api/soundboard/'+id,{method:'POST'});
+      if(!r.ok)throw new Error('Failed');
+      const {task_id}=await r.json();
+      this.genMode='soundboard';
+      this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
+      this.showGen=true;
+      this._pollSb(task_id,id);
+    }catch(e){alert('Error: '+e.message)}
+  },
+
+  _pollSb(taskId,brandId){
+    if(this.sbInterval)clearInterval(this.sbInterval);
+    this.sbInterval=setInterval(async()=>{
+      try{
+        const r=await fetch('/api/generate/status/'+taskId);
+        if(r.ok){
+          this.genTask=await r.json();
+          this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
+          if(this.genTask.status==='done'||this.genTask.status==='error'){
+            const finalStatus=this.genTask.status;
+            clearInterval(this.sbInterval);this.sbInterval=null;
+            await this.loadBrands();
+            if(finalStatus==='done'){
+              const b=this.brands.find(x=>x.id===brandId);
+              if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
+              this.showGen=false;
+              this.$nextTick(()=>this.initSbCharts());
+              await this.generatePlaylist(brandId);
+            } else {
+              this.showGen=false;
+              this.$nextTick(()=>this.initSbCharts());
+            }
+          }
+        }
+      }catch(e){}
+    },1000);
+  },
+
+  async generatePlaylist(id){
+    if(!id)return;
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    // Show modal immediately so user gets instant feedback
+    this.genMode='playlist';
+    this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
+    this.showGen=true;
+    try{
+      const r=await fetch('/api/generate/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({genre_overrides:this.sbGenreOverrides})});
+      if(!r.ok)throw new Error('Server returned '+r.status);
+      const {task_id}=await r.json();
+      this.genTask.log=['Queued...'];
+      this._pollGen(task_id,id);
+    }catch(e){
+      this.genTask={status:'error',progress:0,log:[],error:e.message};
+    }
+  },
+
+  _pollGen(taskId,brandId){
+    if(this.genInterval)clearInterval(this.genInterval);
+    this.genInterval=setInterval(async()=>{
+      try{
+        const r=await fetch('/api/generate/status/'+taskId);
+        if(r.ok){
+          this.genTask=await r.json();
+          this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
+          if(this.genTask.status==='done'||this.genTask.status==='error'){
+            const finalStatus=this.genTask.status;
+            clearInterval(this.genInterval);this.genInterval=null;
+            if(finalStatus==='done'){
+              // Fetch playlist first so tracks show immediately on navigation
+              if(brandId){try{const pr=await fetch('/api/playlists/'+brandId);if(pr.ok)this.curPl=await pr.json()}catch(e){}}
+              this.showGen=false;
+              this.genTask=null;
+              this.page='playlists';
+              this.$nextTick(()=>this.initSbCharts());
+              // Refresh sidebar data in background (non-blocking)
+              Promise.all([this.loadBrands(),this.loadStats(),this.loadActivity()]);
+            }
+          }
+        }
+      }catch(e){}
+    },1500);
+  },
+
+  async deleteBrand(id,name){
+    if(!confirm('Delete "'+name+'"?'))return;
+    try{
+      await fetch('/api/brands/'+id,{method:'DELETE'});
+      await this.loadBrands();await this.loadStats();
+      if(this.curBrand?.id===id){this.curBrand=null;this.curPl=null;this.page='brands'}
+    }catch(e){}
+  },
+
+  // ── Sound board review helpers ─────────────
+  sbAudioParams(){
+    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
+    const dp0=this.curBrand?.sound_board_result?.day_parts?.[0]||this.curPl?.day_parts?.[0]||{};
+    const e=sb.energy_target??dp0.energy_target??0.5;
+    const v=sb.valence_target??dp0.valence_target??0.5;
+    const t=sb.tempo_target??dp0.tempo_target??110;
+    const d=sb.danceability_target??dp0.danceability_target??0.5;
+    const a=sb.acousticness_target??dp0.acousticness_target??0.4;
+    const ins=sb.instrumentalness_target??dp0.instrumentalness_target??0.4;
+    const l=sb.loudness_target??dp0.loudness_target??0.5;
+    const s=sb.speechiness_target??dp0.speechiness_target??0.2;
+
+    // Clamp a value between lo and hi
+    const clamp=(x,lo,hi)=>Math.min(hi,Math.max(lo,x));
+
+    // IMPORTANT: all visual elements use the SAME targetVal so thumb always starts inside the pink range.
+    const mk=(k,left,right,val,rawMin,rawMax,tgt)=>{
+      const isT=k==='tempo';
+      const SPREAD=isT?18:0.15;
+      const LO=isT?60:0, HI=isT?180:1;
+      const targetVal = (tgt!=null && tgt!==undefined) ? tgt : val;
+      let mn, mx;
+      if(this._origRanges[k]){
+        mn=this._origRanges[k].min;
+        mx=this._origRanges[k].max;
+      } else {
+        const isDefault = isT ? (rawMin===60 && rawMax===180) : (rawMin===0 && rawMax===1);
+        const hasRealRange = rawMin!=null && rawMax!=null && !isDefault;
+        mn = hasRealRange ? rawMin : clamp(targetVal-SPREAD, LO, HI);
+        mx = hasRealRange ? rawMax : clamp(targetVal+SPREAD, LO, HI);
+        this._origRanges[k]={min:mn, max:mx};
+      }
+      const pct = isT?((targetVal-60)/120)*100:targetVal*100;
+      const item={key:k,label:k,left,right,pct,
+                  display:isT?Math.round(targetVal)+' BPM':targetVal.toFixed(2),
+                  min:mn, max:mx, target:targetVal};
+      if(this._origTargets[k]===undefined)this._origTargets[k]=targetVal;
+      return item;
+    };
+    return[
+      mk('energy','Calm','Energetic',e,dp0.energy_min,dp0.energy_max,dp0.energy_target),
+      mk('valence','Melancholic','Cheerful',v,dp0.valence_min,dp0.valence_max,dp0.valence_target),
+      mk('tempo','Slow (60)','Fast (180)',t,dp0.tempo_min,dp0.tempo_max,dp0.tempo_target),
+      mk('danceability','Free-form','Groovy',d,dp0.danceability_min,dp0.danceability_max,dp0.danceability_target),
+      mk('acousticness','Electronic','Acoustic',a,dp0.acousticness_min,dp0.acousticness_max,dp0.acousticness_target),
+      mk('instrumentalness','Vocal','Instrumental',ins,dp0.instrumentalness_min,dp0.instrumentalness_max,dp0.instrumentalness_target),
+      mk('loudness','Quiet','Loud',l,dp0.loudness_min,dp0.loudness_max,dp0.loudness_target),
+      mk('speechiness','No Speech','Spoken Word',s,dp0.speechiness_min,dp0.speechiness_max,dp0.speechiness_target),
+    ];
+  },
+
+  updateTarget(p,valStr){
+    const val=Number(valStr);
+    const sb=this.curBrand?.sound_board_result;
+    if(sb){
+      if(!sb.sound_board)sb.sound_board={};
+      sb.sound_board[p.key+'_target']=val;
+      if(sb.day_parts)sb.day_parts.forEach(dp=>{dp[p.key+'_target']=val});
+    }
+    p.target=val;
+    p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
+    p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
+    this.saveTargets();
+  },
+
+  resetTarget(p){
+    // Revert to the original AI midpoint that was stored when sbAudioParams() ran
+    const orig=this._origTargets[p.key];
+    if(orig===undefined)return;
+    this.updateTarget(p, orig);
+  },
+
+  saveTargets(){
+    if(!this.curBrand?.id||!this.curBrand?.sound_board_result)return;
+    // Debounce: only fire 800 ms after the last change
+    if(this._sbSaveTimer)clearTimeout(this._sbSaveTimer);
+    this._sbSaveTimer=setTimeout(async()=>{
+      const sb=this.curBrand.sound_board_result?.sound_board||{};
+      const keys=['energy_target','valence_target','tempo_target','danceability_target',
+                   'acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
+      const targets={};
+      keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
+      try{
+        await fetch('/api/brands/'+this.curBrand.id+'/soundboard',{
+          method:'PUT',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({targets})
+        });
+      }catch(e){console.warn('Could not save soundboard targets:',e)}
+    },800);
+  },
+
+  saveDayPartData(){
+    if(!this.curBrand?.id) return;
+    const dps=this.curBrand?.sound_board_result?.day_parts;
+    if(!dps?.length) return;
+    if(this._dpSaveTimer) clearTimeout(this._dpSaveTimer);
+    this._dpSaveTimer=setTimeout(async()=>{
+      try{
+        const payload=dps.map(dp=>({
+          energy_target:dp.energy_target,
+          valence_target:dp.valence_target,
+          tempo_target:dp.tempo_target,
+          danceability_target:dp.danceability_target,
+          acousticness_target:dp.acousticness_target,
+          instrumentalness_target:dp.instrumentalness_target,
+          loudness_target:dp.loudness_target,
+          speechiness_target:dp.speechiness_target,
+        }));
+        await fetch('/api/brands/'+this.curBrand.id+'/dayparts',{
+          method:'PUT',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({day_parts:payload})
+        });
+      }catch(e){console.warn('Could not save day part data:',e)}
+    },600);
+  },
+
+  sbAllGenres(){
+    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
+    const all=[...new Set([...(sb.primary_genres||[]),...(sb.secondary_genres||[])])];
+    (this.curBrand?.inputs?.include_genres||[]).forEach(g=>{if(!all.includes(g))all.push(g)});
+    this.sbGenreOverrides.include.forEach(g=>{if(!all.includes(g))all.push(g)});
+    this.sbGenreOverrides.exclude.forEach(g=>{if(!all.includes(g))all.push(g)});
+    return all;
+  },
+  sbIncluded(g){
+    if(this.sbGenreOverrides.exclude.includes(g))return false;
+    if(this.sbGenreOverrides.include.includes(g))return true;
+    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
+    return[...(sb.primary_genres||[]),...(sb.secondary_genres||[]),...(this.curBrand?.inputs?.include_genres||[])].includes(g);
+  },
+  sbExcluded(g){return(this.curBrand?.inputs?.exclude_genres||[]).includes(g)||this.sbGenreOverrides.exclude.includes(g)},
+  toggleSbGenre(g){
+    const inc=this.sbGenreOverrides.include;const exc=this.sbGenreOverrides.exclude;
+    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
+    const isOriginal=[...(sb.primary_genres||[]),...(sb.secondary_genres||[]),...(this.curBrand?.inputs?.include_genres||[])].includes(g);
+    // excluded state: original → back to included; manually added → remove entirely
+    if(exc.includes(g)){
+      this.sbGenreOverrides.exclude=exc.filter(x=>x!==g);
+      if(!isOriginal)this.sbGenreOverrides.include=inc.filter(x=>x!==g);
+      this._saveGenreOverrides();return;
+    }
+    // included → move to excluded (stays visible as crossed out)
+    if(inc.includes(g)){this.sbGenreOverrides.include=inc.filter(x=>x!==g);this.sbGenreOverrides.exclude=[...exc,g];this._saveGenreOverrides();return}
+    if(this.sbIncluded(g)){this.sbGenreOverrides.exclude=[...exc,g];this._saveGenreOverrides();return}
+    this.sbGenreOverrides.include=[...inc,g];this._saveGenreOverrides();
+  },
+
+  dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
+
+  initSbCharts(){
+    const brand=this.curBrand;const pl=this.curPl;
+    if(!brand&&!pl)return;
+    const profile=pl?.brand_profile||brand?.brand_profile||{};
+    const dps=(brand?.sound_board_result?.day_parts)||pl?.day_parts||[];
+    if(this.sbCharts.radar){this.sbCharts.radar.destroy();this.sbCharts.radar=null}
+    if(this.sbCharts.timeline){this.sbCharts.timeline.destroy();this.sbCharts.timeline=null}
+    const rc=document.getElementById('sb-radar');
+    if(rc){
+      this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:true,layout:{padding:18},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:8}}}},plugins:{legend:{display:false},dragData:false}}});
+    }
+    const tc=document.getElementById('sb-timeline');
+    if(tc&&dps.length){
+      // Keep a stable reference to the dps array for drag callbacks
+      const dpsRef=dps;
+      const round2=v=>Math.round(v*100)/100;
+      this.sbCharts.timeline=new Chart(tc,{
+        type:'line',
+        data:{
+          labels:dpsRef.map(d=>d.name||d.start_time),
+          datasets:[
+            {
+              label:'Energy',
+              data:dpsRef.map(d=>d.energy_target),
+              borderColor:'#EF4444',
+              backgroundColor:'rgba(239,68,68,0.12)',
+              fill:true,
+              tension:0.35,
+              borderWidth:2.5,
+              pointRadius:7,
+              pointHoverRadius:9,
+              pointBackgroundColor:'#EF4444',
+              pointBorderColor:'#fff',
+              pointBorderWidth:2,
+              dragData:true
+            },
+            {
+              label:'Valence',
+              data:dpsRef.map(d=>d.valence_target),
+              borderColor:'#3B82F6',
+              backgroundColor:'rgba(59,130,246,0.06)',
+              fill:true,
+              tension:0.35,
+              borderWidth:2.5,
+              pointRadius:7,
+              pointHoverRadius:9,
+              pointBackgroundColor:'#3B82F6',
+              pointBorderColor:'#fff',
+              pointBorderWidth:2,
+              dragData:true
+            }
+          ]
+        },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          animation:{duration:0},
+          plugins:{
+            legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
+            tooltip:{
+              callbacks:{
+                label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`
+              }
+            },
+            dragData:{
+              round:2,
+              showTooltip:true,
+              magnet:{to:v=>Math.round(v*100)/100},
+              onDragStart:(e,datasetIndex,index,value)=>{
+                // Change cursor to grabbing
+                tc.style.cursor='grabbing';
+              },
+              onDrag:(e,datasetIndex,index,value)=>{
+                tc.style.cursor='grabbing';
+                return round2(Math.min(1,Math.max(0,value)));
+              },
+              onDragEnd:(e,datasetIndex,index,value)=>{
+                tc.style.cursor='grab';
+                const clamped=round2(Math.min(1,Math.max(0,value)));
+                if(datasetIndex===0) dpsRef[index].energy_target=clamped;
+                else dpsRef[index].valence_target=clamped;
+                this.saveDayPartData();
+              }
+            }
+          },
+          scales:{
+            y:{min:0,max:1,ticks:{stepSize:0.25},grid:{color:'#F0EEE9'}},
+            x:{grid:{display:false}}
+          }
+        }
+      });
+      // Show grab cursor on hover over the chart
+      tc.style.cursor='default';
+      tc.addEventListener('mousemove',()=>{ if(tc.style.cursor!=='grabbing')tc.style.cursor='grab'; });
+      tc.addEventListener('mouseleave',()=>{ tc.style.cursor='default'; });
+    }
+  },
+
+  initSbChartsModal(){
+    const brand=this.curBrand;const pl=this.curPl;
+    if(!brand&&!pl)return;
+    const profile=brand?.brand_profile||pl?.brand_profile||{};
+    if(this.sbCharts.radarLg){this.sbCharts.radarLg.destroy();this.sbCharts.radarLg=null}
+    const rc=document.getElementById('sb-radar-lg');
+    if(rc){
+      rc.width=380;rc.height=380;
+      const DIMS=['sincerity','excitement','competence','sophistication','ruggedness'];
+      const profileRef=profile;
+      const round2=v=>Math.round(v*100)/100;
+      this.sbCharts.radarLg=new Chart(rc,{
+        type:'radar',
+        data:{
+          labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],
+          datasets:[{
+            data:DIMS.map(d=>profileRef[d]||0),
+            backgroundColor:'rgba(192,57,43,0.2)',
+            borderColor:'rgba(192,57,43,0.8)',
+            pointBackgroundColor:'rgba(192,57,43,1)',
+            pointBorderColor:'#fff',
+            pointBorderWidth:2,
+            pointRadius:7,
+            pointHoverRadius:9,
+            borderWidth:2.5,
+            dragData:true
+          }]
+        },
+        options:{
+          responsive:false,
+          maintainAspectRatio:true,
+          layout:{padding:36},
+          animation:{duration:0},
+          scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:13}}}},
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${ctx.parsed.r.toFixed(2)}`}},
+            dragData:{
+              round:2,
+              showTooltip:true,
+              onDrag:(e,datasetIndex,index,value)=>{
+                rc.style.cursor='grabbing';
+                return round2(Math.min(1,Math.max(0,value)));
+              },
+              onDragEnd:(e,datasetIndex,index,value)=>{
+                rc.style.cursor='grab';
+                const clamped=round2(Math.min(1,Math.max(0,value)));
+                const key=DIMS[index];
+                // Update in-memory profile
+                if(this.curBrand?.brand_profile) this.curBrand.brand_profile[key]=clamped;
+                else if(this.curBrand) this.curBrand.brand_profile={[key]:clamped};
+                // Also update small radar if visible
+                const smallChart=this.sbCharts.radar;
+                if(smallChart){smallChart.data.datasets[0].data[index]=clamped;smallChart.update();}
+                this.saveProfileData();
+              }
+            }
+          }
+        }
+      });
+      rc.style.cursor='default';
+      rc.addEventListener('mousemove',()=>{if(rc.style.cursor!=='grabbing')rc.style.cursor='grab';});
+      rc.addEventListener('mouseleave',()=>{rc.style.cursor='default';});
+    }
+  },
+
+  saveProfileData(){
+    if(!this.curBrand?.id||!this.curBrand?.brand_profile) return;
+    if(this._profileSaveTimer) clearTimeout(this._profileSaveTimer);
+    this._profileSaveTimer=setTimeout(async()=>{
+      const p=this.curBrand.brand_profile;
+      try{
+        await fetch('/api/brands/'+this.curBrand.id+'/profile',{
+          method:'PUT',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            sincerity:p.sincerity,
+            excitement:p.excitement,
+            competence:p.competence,
+            sophistication:p.sophistication,
+            ruggedness:p.ruggedness
+          })
+        });
+      }catch(e){console.warn('Could not save brand profile:',e)}
+    },600);
+  },
+
+  // ── Player ─────────────────────────────────
+  _bindPlayer(){
+    const p=this.player;
+    p.volume=0.8;
+    p.addEventListener('timeupdate',()=>{this.npCurrent=p.currentTime;this.npDuration=p.duration||0;if(this.$refs.scrub)this.$refs.scrub.value=p.currentTime});
+    p.addEventListener('play',()=>{this.npPlaying=true});
+    p.addEventListener('pause',()=>{this.npPlaying=false});
+    p.addEventListener('ended',()=>{this.nextTrack()});
+    p.addEventListener('error',()=>{this.npTitle=(this.npTitle||'Track')+' (no file)';this.npPlaying=false});
+  },
+  playTrack(track,ti,dpIdx){
+    if(!track.src){this.npTitle=(track.title||'Unknown')+' — no audio file';this.npArtist=track.artist||'';this.npTrackKey=ti+'-'+dpIdx;return}
+    const dp=this.curPl?.day_parts?.[dpIdx];
+    if(dp){this.npQueue=(dp.tracks||[]).map((t,i)=>({...t,_dpIdx:dpIdx,_ti:i}));this.npQueueIdx=ti}
+    this._loadAndPlay(track,ti,dpIdx);
+  },
+  _loadAndPlay(track,ti,dpIdx){
+    this.player.src=track.src||'';
+    this.npTitle=track.title||'Unknown';this.npArtist=track.artist||'';this.npTrackKey=ti+'-'+dpIdx;
+    this.player.play().catch(()=>{this.npTitle=(track.title||'Unknown')+' (no file)';this.npPlaying=false});
+  },
+  togglePlay(){if(!this.player.src)return;this.player.paused?this.player.play():this.player.pause()},
+  toggleApprove(dpIdx, ti){const k=dpIdx+'-'+ti;if(this.approvedTracks[k])delete this.approvedTracks[k];else this.approvedTracks[k]=true;this.approvedTracks={...this.approvedTracks}},
+  isApproved(dpIdx, ti){return!!this.approvedTracks[dpIdx+'-'+ti]},
+  nextTrack(){if(!this.npQueue.length)return;let n=this.npQueueIdx+1;while(n<this.npQueue.length&&!this.npQueue[n].src)n++;if(n<this.npQueue.length){this.npQueueIdx=n;const t=this.npQueue[n];this._loadAndPlay(t,t._ti,t._dpIdx)}},
+  prevTrack(){if(!this.npQueue.length)return;let p=this.npQueueIdx-1;while(p>=0&&!this.npQueue[p].src)p--;if(p>=0){this.npQueueIdx=p;const t=this.npQueue[p];this._loadAndPlay(t,t._ti,t._dpIdx)}},
+  seekTo(v){if(this.player)this.player.currentTime=+v},
+  setVolume(v){if(this.player)this.player.volume=+v},
+  fmtTime(s){if(!s||isNaN(s))return'0:00';const m=Math.floor(s/60),sec=Math.floor(s%60);return m+':'+(sec<10?'0':'')+sec},
+
+  // ── UI helpers ─────────────────────────────
+  catLabel(v){return(this.cats.find(c=>c.v===v)?.l||v||'').replace(/^[^\s]+\s/,'')},
+  catEmoji(v){const m={cafe:'☕',qsr:'🍔',jewelry:'💎',fashion_footwear:'👟',footwear:'👟',fine_dine:'🍽️',casual_dine:'🍽️',supermarket:'🛒',hotel:'🏨',furniture:'🛋️',mall:'🏬',spa:'🧘',gym:'💪',salon:'✂️',bookstore:'📚',electronics:'💻',kids_store:'🧸',bar_lounge:'🍸',clinic:'🏥',coworking:'💼'};return m[v]||'🏪'},
+  catColor(v){const m={cafe:'#92400E',qsr:'#991B1B',jewelry:'#6D28D9',fashion_footwear:'#1D4ED8',footwear:'#1D4ED8',fine_dine:'#111827',supermarket:'#15803D',mall:'#4C1D95',hotel:'#0C4A6E',spa:'#065F46',gym:'#7F1D1D',salon:'#831843',bookstore:'#713F12',electronics:'#1E3A8A',kids_store:'#1E40AF',bar_lounge:'#4C1D95',clinic:'#0C4A6E',coworking:'#064E3B'};return m[v]||'#374151'},
+  segLabel(v){return this.segs.find(s=>s.v===v)?.l||v||'Mid-Range'},
+  _timeAgo(ts){
+    try{const dt=new Date(ts);const now=new Date();const s=Math.floor((now-dt)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}catch(e){return''}
+  },
+}
+}
