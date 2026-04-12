@@ -7,7 +7,7 @@ import httpx
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, RedirectResponse
 
 import os
 from dotenv import load_dotenv
@@ -23,7 +23,31 @@ SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent 
 
 
 @app.get("/")
-async def serve_index():
+async def serve_landing():
+    return FileResponse(str(STATIC_DIR / "landing.html"))
+
+
+@app.get("/login")
+async def serve_login():
+    return FileResponse(str(STATIC_DIR / "login.html"))
+
+
+@app.get("/auth/callback")
+async def serve_auth_callback():
+    return FileResponse(str(STATIC_DIR / "auth-callback.html"))
+
+
+@app.get("/dashboard")
+async def serve_dashboard(request: Request):
+    # Server-side guard: redirect to /login if no session cookie present.
+    # The real security is enforced by the API's JWT check on every request.
+    if not request.cookies.get("fabplay_session"):
+        return RedirectResponse("/login", status_code=302)
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/dashboard/{path:path}")
+async def serve_dashboard_paths(path: str):
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
@@ -81,4 +105,4 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8003, reload=True)
+    uvicorn.run("frontend.server:app", host="0.0.0.0", port=8003, reload=True)

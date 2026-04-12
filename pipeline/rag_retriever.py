@@ -9,7 +9,7 @@ For each day-part:
 
 import logging
 
-from db import fetch_all_songs, fetch_songs_by_artist, fetch_songs_by_genre
+from backend.db import fetch_all_songs, fetch_songs_by_artist, fetch_songs_by_genre
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,10 @@ def _apply_exclusion_filters_only(
     return filtered
 
 
-def _normalise_list(raw: str | list) -> list[str]:
+from typing import Union
+
+
+def _normalise_list(raw: Union[str, list]) -> list[str]:
     if isinstance(raw, list):
         return [str(x).strip() for x in raw if str(x).strip()]
     if not raw:

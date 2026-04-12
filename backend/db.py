@@ -5,11 +5,12 @@ db.py — Supabase client, startup checks, and data helpers for fabPLAY v2.0
 import os
 import sys
 from supabase import create_client, Client
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_supabase: Client | None = None
+_supabase: Optional[Client] = None
 
 
 def get_supabase() -> Client:

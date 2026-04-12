@@ -58,12 +58,23 @@
       <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       Settings
     </button>
+    <button x-show="currentRole === 'superadmin'" @click="page='iam'; loadIamUsers()" :class="page==='iam'?'on':''" class="nav-item">
+      <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      User Management
+    </button>
   </nav>
 
   <div class="sb-footer">
     <div class="sb-status">
       <div class="sb-dot" :class="catalogStats.total_songs>0?'live':''"></div>
       <span x-text="catalogStats.total_songs>0 ? catalogStats.total_songs.toLocaleString()+' songs' : 'Connecting...'"></span>
+    </div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr)">
+      <div style="font-size:11px;color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="currentUser?.email || ''"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+        <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--accent);font-weight:600" x-text="currentRole"></span>
+        <button @click="logout()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Sign Out</button>
+      </div>
     </div>
   </div>
 </aside>
@@ -77,7 +88,7 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Dashboard</h1>
-      <p class="page-sub">Welcome back, Jane</p>
+      <p class="page-sub" x-text="'Welcome back, ' + (currentUser?.email?.split('@')[0] || '')"></p>
     </div>
   </div>
   <div class="px-7 py-6 space-y-6">
@@ -724,6 +735,53 @@
   <div class="np-vol flex-shrink-0">
     <svg class="w-4 h-4" style="color:rgba(255,255,255,.4)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
     <input type="range" min="0" max="1" step="0.05" value="0.8" @input="setVolume($event.target.value)" style="width:72px;accent-color:var(--red);cursor:pointer">
+  </div>
+</div>
+
+<!-- ─── IAM: User Management ─── -->
+<div x-show="page==='iam'" class="fade" id="page-iam">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">User Management</h1>
+      <p class="page-sub" x-text="iamUsers.length + ' user' + (iamUsers.length===1?'':'s')"></p>
+    </div>
+  </div>
+  <div class="px-7 py-6">
+    <div class="card" style="overflow:hidden">
+      <div x-show="iamLoading" class="p-8 text-center text-sm" style="color:var(--muted)">Loading users…</div>
+      <table x-show="!iamLoading" class="w-full text-sm" style="border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--bdr);background:var(--bg)">
+            <th class="text-left p-3" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Email</th>
+            <th class="text-left p-3" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Role</th>
+            <th class="text-left p-3" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Joined</th>
+            <th class="text-left p-3" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Last Sign In</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="u in iamUsers" :key="u.id">
+            <tr style="border-bottom:1px solid var(--bdr)">
+              <td class="p-3" style="font-weight:500" x-text="u.email"></td>
+              <td class="p-3">
+                <select
+                  @change="updateUserRole(u.id, $event.target.value)"
+                  :value="u.role"
+                  style="border:1px solid var(--bdr);border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;background:var(--bg);color:var(--text);cursor:pointer">
+                  <option value="viewer">Viewer</option>
+                  <option value="admin">Admin</option>
+                  <option value="superadmin">Superadmin</option>
+                </select>
+              </td>
+              <td class="p-3" style="color:var(--faint);font-size:12px" x-text="u.created_at ? _timeAgo(u.created_at) : '—'"></td>
+              <td class="p-3" style="color:var(--faint);font-size:12px" x-text="u.last_sign_in ? _timeAgo(u.last_sign_in) : 'Never'"></td>
+            </tr>
+          </template>
+          <tr x-show="!iamLoading && iamUsers.length===0">
+            <td colspan="4" class="p-8 text-center" style="color:var(--muted);font-size:13px">No users found</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 

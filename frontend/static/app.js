@@ -11,6 +11,12 @@ return {
   curPl: null,
   brandSearch: '',
   createStep: 0,
+
+  // ── Auth state ──────────────────────────────
+  currentUser: null,
+  currentRole: 'viewer',
+  iamUsers: [],
+  iamLoading: false,
   steps: ['Basic Info','Brand Assets','Customer Profile','Music Preferences','Review'],
   analyzing: false,
   analyzingAssets: false,
@@ -87,6 +93,17 @@ return {
   ],
 
   async init(){
+    // ── Auth preflight ──────────────────────────
+    if (!this.authToken()) { window.location.href = '/login'; return; }
+    try {
+      const me = await this.apiFetch('/api/auth/me');
+      if (!me) return; // apiFetch already redirected to /login
+      const meData = await me.json();
+      this.currentUser = meData;
+      this.currentRole = meData.role;
+    } catch(e) { window.location.href = '/login'; return; }
+    // ── End auth preflight ──────────────────────
+
     this.player = new Audio();
     this._bindPlayer();
     await Promise.all([this.loadStats(), this.loadBrands(), this.loadActivity(), this.loadCatalogStats()]);
@@ -98,20 +115,20 @@ return {
         this.$nextTick(()=>this.initSbCharts());
       }
       if(val==='playlists' && this.curBrand && !this.curPl){
-        try{const r=await fetch('/api/playlists/'+this.curBrand.id);if(r.ok)this.curPl=await r.json()}catch(e){}
+        try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
       }
     });
   },
 
-  async loadStats(){ try{ const r=await fetch('/api/stats'); if(r.ok)this.stats=await r.json() }catch(e){} },
-  async loadBrands(){ try{ const r=await fetch('/api/brands'); if(r.ok)this.brands=await r.json() }catch(e){} },
-  async loadActivity(){ try{ const r=await fetch('/api/activity'); if(r.ok)this.activity=await r.json() }catch(e){} },
-  async loadCatalogStats(){ try{ const r=await fetch('/api/catalog/stats'); if(r.ok)this.catalogStats=await r.json() }catch(e){} },
+  async loadStats(){ try{ const r=await this.apiFetch('/api/stats'); if(r&&r.ok)this.stats=await r.json() }catch(e){} },
+  async loadBrands(){ try{ const r=await this.apiFetch('/api/brands'); if(r&&r.ok)this.brands=await r.json() }catch(e){} },
+  async loadActivity(){ try{ const r=await this.apiFetch('/api/activity'); if(r&&r.ok)this.activity=await r.json() }catch(e){} },
+  async loadCatalogStats(){ try{ const r=await this.apiFetch('/api/catalog/stats'); if(r&&r.ok)this.catalogStats=await r.json() }catch(e){} },
   async loadCatalog(){
     try{
-      const [s,songs]=await Promise.all([fetch('/api/catalog/stats'),fetch('/api/catalog/songs')]);
-      if(s.ok)this.catalogStats=await s.json();
-      if(songs.ok){const d=await songs.json();this.catalogSongs=d.songs||[]}
+      const [s,songs]=await Promise.all([this.apiFetch('/api/catalog/stats'),this.apiFetch('/api/catalog/songs')]);
+      if(s&&s.ok)this.catalogStats=await s.json();
+      if(songs&&songs.ok){const d=await songs.json();this.catalogSongs=d.songs||[]}
     }catch(e){}
   },
 
@@ -124,7 +141,7 @@ return {
   async openBrand(id){
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
-    try{const r=await fetch('/api/playlists/'+id);if(r.ok)this.curPl=await r.json();else this.curPl=null}catch(e){this.curPl=null}
+    try{const r=await this.apiFetch('/api/playlists/'+id);if(r&&r.ok)this.curPl=await r.json();else this.curPl=null}catch(e){this.curPl=null}
     this.activeDp=0;
     const saved=localStorage.getItem('sbGenreOverrides_'+id);
     this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
@@ -159,7 +176,7 @@ return {
   async analyzeAndContinue(){
     this.analyzing=true;
     try{
-      const r=await fetch('/api/quick-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand_name:this.form.brand_name,website_url:this.form.website_url,category:this.form.category})});
+      const r=await this.apiFetch('/api/quick-analyze',{method:'POST',body:JSON.stringify({brand_name:this.form.brand_name,website_url:this.form.website_url,category:this.form.category})});
       if(r.ok){
         const s=await r.json();
         if(s.customer_segment)this.form.customer_segment=s.customer_segment;
@@ -184,15 +201,15 @@ return {
     try{
       const fd=new FormData();
       this.uploadedFiles.forEach(f=>fd.append('files',f));
-      const r=await fetch('/api/analyze-assets-preview',{method:'POST',body:fd});
-      if(r.ok){
+      const r=await this.apiFetch('/api/analyze-assets-preview',{method:'POST',body:fd});
+      if(r&&r.ok){
         const data=await r.json();
         this.assetAnalysis=data.asset_analysis||'';
         const knownLower=this.allGenres.map(g=>g.toLowerCase());
         if(data.recommended_genres?.length){data.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
         if(data.avoid_genres?.length){data.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
         if(data.music_notes&&!this.form.music_notes)this.form.music_notes=data.music_notes;
-      } else {
+      } else if(r) {
         const txt=await r.text().catch(()=>'');
         console.error('Asset analysis failed:',r.status,txt);
       }
@@ -215,14 +232,14 @@ return {
     this.submitting=true;
     try{
       const body={...this.form,customer_description:this.form.customer_types.length?this.form.customer_types.join(', '):this.form.customer_description,asset_analysis:this.assetAnalysis};
-      const r=await fetch('/api/brands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(!r.ok)throw new Error('Failed');
+      const r=await this.apiFetch('/api/brands',{method:'POST',body:JSON.stringify(body)});
+      if(!r||!r.ok)throw new Error('Failed');
       const brand=await r.json();
       // Upload files only if asset analysis wasn't already done in step 1
       if(this.uploadedFiles.length&&!this.assetAnalysis){
         const fd=new FormData();
         this.uploadedFiles.forEach(f=>fd.append('files',f));
-        await fetch('/api/brands/'+brand.id+'/assets',{method:'POST',body:fd});
+        await this.apiFetch('/api/brands/'+brand.id+'/assets',{method:'POST',body:fd});
       }
       await this.loadBrands();
       this.curBrand=brand;this.curPl=null;this._origRanges={};this._origTargets={};
@@ -249,8 +266,8 @@ return {
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
     try{
-      const r=await fetch('/api/soundboard/'+id,{method:'POST'});
-      if(!r.ok)throw new Error('Failed');
+      const r=await this.apiFetch('/api/soundboard/'+id,{method:'POST'});
+      if(!r||!r.ok)throw new Error('Failed');
       const {task_id}=await r.json();
       this.genMode='soundboard';
       this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
@@ -263,8 +280,8 @@ return {
     if(this.sbInterval)clearInterval(this.sbInterval);
     this.sbInterval=setInterval(async()=>{
       try{
-        const r=await fetch('/api/generate/status/'+taskId);
-        if(r.ok){
+        const r=await this.apiFetch('/api/generate/status/'+taskId);
+        if(r&&r.ok){
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
@@ -276,7 +293,6 @@ return {
               if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
               this.showGen=false;
               this.$nextTick(()=>this.initSbCharts());
-              await this.generatePlaylist(brandId);
             } else {
               this.showGen=false;
               this.$nextTick(()=>this.initSbCharts());
@@ -296,8 +312,8 @@ return {
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
     try{
-      const r=await fetch('/api/generate/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({genre_overrides:this.sbGenreOverrides})});
-      if(!r.ok)throw new Error('Server returned '+r.status);
+      const r=await this.apiFetch('/api/generate/'+id,{method:'POST',body:JSON.stringify({genre_overrides:this.sbGenreOverrides})});
+      if(!r||!r.ok)throw new Error('Server returned '+(r?.status||'error'));
       const {task_id}=await r.json();
       this.genTask.log=['Queued...'];
       this._pollGen(task_id,id);
@@ -310,8 +326,8 @@ return {
     if(this.genInterval)clearInterval(this.genInterval);
     this.genInterval=setInterval(async()=>{
       try{
-        const r=await fetch('/api/generate/status/'+taskId);
-        if(r.ok){
+        const r=await this.apiFetch('/api/generate/status/'+taskId);
+        if(r&&r.ok){
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
@@ -319,7 +335,7 @@ return {
             clearInterval(this.genInterval);this.genInterval=null;
             if(finalStatus==='done'){
               // Fetch playlist first so tracks show immediately on navigation
-              if(brandId){try{const pr=await fetch('/api/playlists/'+brandId);if(pr.ok)this.curPl=await pr.json()}catch(e){}}
+              if(brandId){try{const pr=await this.apiFetch('/api/playlists/'+brandId);if(pr&&pr.ok)this.curPl=await pr.json()}catch(e){}}
               this.showGen=false;
               this.genTask=null;
               this.page='playlists';
@@ -336,7 +352,7 @@ return {
   async deleteBrand(id,name){
     if(!confirm('Delete "'+name+'"?'))return;
     try{
-      await fetch('/api/brands/'+id,{method:'DELETE'});
+      await this.apiFetch('/api/brands/'+id,{method:'DELETE'});
       await this.loadBrands();await this.loadStats();
       if(this.curBrand?.id===id){this.curBrand=null;this.curPl=null;this.page='brands'}
     }catch(e){}
@@ -426,9 +442,8 @@ return {
       const targets={};
       keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
       try{
-        await fetch('/api/brands/'+this.curBrand.id+'/soundboard',{
+        await this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{
           method:'PUT',
-          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({targets})
         });
       }catch(e){console.warn('Could not save soundboard targets:',e)}
@@ -452,9 +467,8 @@ return {
           loudness_target:dp.loudness_target,
           speechiness_target:dp.speechiness_target,
         }));
-        await fetch('/api/brands/'+this.curBrand.id+'/dayparts',{
+        await this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{
           method:'PUT',
-          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({day_parts:payload})
         });
       }catch(e){console.warn('Could not save day part data:',e)}
@@ -664,9 +678,8 @@ return {
     this._profileSaveTimer=setTimeout(async()=>{
       const p=this.curBrand.brand_profile;
       try{
-        await fetch('/api/brands/'+this.curBrand.id+'/profile',{
+        await this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{
           method:'PUT',
-          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({
             sincerity:p.sincerity,
             excitement:p.excitement,
@@ -708,6 +721,49 @@ return {
   seekTo(v){if(this.player)this.player.currentTime=+v},
   setVolume(v){if(this.player)this.player.volume=+v},
   fmtTime(s){if(!s||isNaN(s))return'0:00';const m=Math.floor(s/60),sec=Math.floor(s%60);return m+':'+(sec<10?'0':'')+sec},
+
+  // ── Auth helpers ────────────────────────────
+  authToken() { return localStorage.getItem('fabplay_token') || ''; },
+
+  async apiFetch(url, opts = {}) {
+    const token = this.authToken();
+    if (!token) { window.location.href = '/login'; return null; }
+    const isFormData = opts.body instanceof FormData;
+    const headers = {
+      ...(!isFormData ? {'Content-Type': 'application/json'} : {}),
+      'Authorization': 'Bearer ' + token,
+      ...(opts.headers || {}),
+    };
+    const r = await fetch(url, {...opts, headers});
+    if (r.status === 401) { this.logout(); return null; }
+    return r;
+  },
+
+  logout() {
+    localStorage.clear();
+    document.cookie = 'fabplay_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    window.location.href = '/login';
+  },
+
+  // ── IAM helpers ─────────────────────────────
+  async loadIamUsers() {
+    this.iamLoading = true;
+    try {
+      const r = await this.apiFetch('/api/iam/users');
+      if (r?.ok) this.iamUsers = await r.json();
+    } catch(e) { console.warn('IAM load error:', e); }
+    finally { this.iamLoading = false; }
+  },
+
+  async updateUserRole(userId, role) {
+    try {
+      await this.apiFetch('/api/iam/users/' + userId + '/role', {
+        method: 'PUT',
+        body: JSON.stringify({role}),
+      });
+      await this.loadIamUsers();
+    } catch(e) { alert('Failed to update role. Please try again.'); }
+  },
 
   // ── UI helpers ─────────────────────────────
   catLabel(v){return(this.cats.find(c=>c.v===v)?.l||v||'').replace(/^[^\s]+\s/,'')},

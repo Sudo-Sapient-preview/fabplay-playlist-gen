@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verifying — fabPLAY</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg: #F9F8F5; --text: #1A1714; --muted: #6B6560; --accent: #C0392B; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text);
+  }
+  .logo { height: 44px; margin-bottom: 8px; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid #E8E5DE;
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg { font-size: 15px; font-weight: 600; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .err { color: #991B1B; font-size: 13px; text-align: center; max-width: 320px; }
+  a { color: var(--accent); text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+<img class="logo" src="/static/logo.jpg" alt="fabPLAY">
+<div class="spinner" id="spinner"></div>
+<p class="msg" id="msg">Verifying your account…</p>
+<p class="sub" id="sub">Please wait a moment</p>
+
+<script>
+(async function () {
+  const msgEl  = document.getElementById('msg');
+  const subEl  = document.getElementById('sub');
+  const spinEl = document.getElementById('spinner');
+
+  function showError(text) {
+    spinEl.style.display = 'none';
+    msgEl.textContent = 'Verification failed';
+    subEl.innerHTML = text + ' <a href="/login">Back to Sign In</a>';
+    subEl.classList.add('err');
+  }
+
+  function storeSession(access_token, refresh_token) {
+    localStorage.setItem('fabplay_token',   access_token);
+    localStorage.setItem('fabplay_refresh',  refresh_token || '');
+    document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
+  }
+
+  // ── 1. Hash-based flow (#access_token=...&type=signup)
+  if (window.location.hash) {
+    const params = new URLSearchParams(window.location.hash.substring(1));
+    const access_token  = params.get('access_token');
+    const refresh_token = params.get('refresh_token');
+    const type          = params.get('type'); // signup | recovery | magiclink
+
+    if (access_token) {
+      storeSession(access_token, refresh_token);
+      msgEl.textContent = 'Verified! Redirecting…';
+      setTimeout(() => { window.location.href = '/dashboard'; }, 800);
+      return;
+    }
+
+    const error_desc = params.get('error_description');
+    if (error_desc) { showError(decodeURIComponent(error_desc)); return; }
+  }
+
+  // ── 2. PKCE code flow (?code=...)
+  const code = new URLSearchParams(window.location.search).get('code');
+  if (code) {
+    try {
+      const cfg = await fetch('/api/config').then(r => r.json());
+      const r = await fetch(cfg.supabase_url + '/auth/v1/token?grant_type=pkce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': cfg.supabase_anon_key },
+        body: JSON.stringify({ auth_code: code })
+      });
+      const data = await r.json();
+      if (!r.ok) { showError(data.error_description || 'Could not verify.'); return; }
+      storeSession(data.access_token, data.refresh_token);
+      msgEl.textContent = 'Verified! Redirecting…';
+      setTimeout(() => { window.location.href = '/dashboard'; }, 800);
+    } catch(e) {
+      showError('Connection error during verification.');
+    }
+    return;
+  }
+
+  // ── Nothing recognised
+  showError('No verification token found in this link.');
+})();
+</script>
+</body>
+</html>

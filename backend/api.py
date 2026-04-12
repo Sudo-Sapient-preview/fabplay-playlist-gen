@@ -13,31 +13,78 @@ import uuid
 import threading
 import logging
 import unicodedata
+from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, APIRouter
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
-from db import get_supabase, run_startup_checks
-from brand_analysis import get_brand_profile
-from sound_board import get_sound_board, apply_segment_adjustments
-from rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks
-from mmr_scorer import mmr_select
-from day_part_templates import get_template, get_day_part_hours, target_track_count
+from backend.db import get_supabase, run_startup_checks
+from brand_pipeline.brand_analysis import get_brand_profile
+from brand_pipeline.sound_board import get_sound_board, apply_segment_adjustments
+from pipeline.rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks
+from pipeline.mmr_scorer import mmr_select
+from brand_pipeline.day_part_templates import get_template, get_day_part_hours, target_track_count
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+
+# ─── Auth config ──────────────────────────────────────────────────────────────
+
+SUPABASE_URL      = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+_bearer = HTTPBearer()
+
+
+async def get_current_user(
+    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> dict:
+    """Validate a Supabase JWT by calling /auth/v1/user. Returns the user dict."""
+    token = creds.credentials
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_SERVICE_KEY,
+            },
+            timeout=5.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return resp.json()
+
+
+async def get_current_role(user: dict = Depends(get_current_user)) -> str:
+    """Fetch this user's role from the user_roles table. Returns 'viewer' if no row found."""
+    result = (
+        get_supabase()
+        .table("user_roles")
+        .select("role")
+        .eq("user_id", user["id"])
+        .maybe_single()
+        .execute()
+    )
+    return result.data["role"] if result.data else "viewer"
+
+
+async def require_superadmin(role: str = Depends(get_current_role)):
+    if role != "superadmin":
+        raise HTTPException(status_code=403, detail="Superadmin access required")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,15 +95,21 @@ async def lifespan(app: FastAPI):
     yield
 
 
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8003").split(",")
 app = FastAPI(title="fabPLAY API v3.0 MMR", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+
+# ─── Routers ──────────────────────────────────────────────────────────────────
+public_router     = APIRouter()
+protected_router  = APIRouter(dependencies=[Depends(get_current_user)])
+superadmin_router = APIRouter(dependencies=[Depends(require_superadmin)])
 
 # ─── Song file resolver ───────────────────────────────────────────────────────
 
-SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent / "songs")))
+SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent / "songs")))
 SONGS_BASE_URL = os.getenv("SONGS_BASE_URL", "").rstrip("/")
-SONGS_MANIFEST = Path(__file__).parent / "songs_manifest.json"
-_file_index: dict | None = None
+SONGS_MANIFEST = Path(__file__).parent.parent / "songs_manifest.json"
+_file_index: Optional[dict] = None
 
 
 def _build_file_index() -> dict:
@@ -117,8 +170,8 @@ def _resolve_track_src(track: dict) -> str:
 
 # ─── Persistence (JSON files) ─────────────────────────────────────────────────
 
-BRANDS_FILE    = Path("brands_store.json")
-PLAYLISTS_FILE = Path("playlists_store.json")
+BRANDS_FILE    = Path("data/brands_store.json")
+PLAYLISTS_FILE = Path("data/playlists_store.json")
 
 
 def _load(path: Path, default):
@@ -361,7 +414,7 @@ def _bg_soundboard(brand_id: str, tid: str):
 
 # ─── Background: Playlist generation (MMR) ───────────────────────────────────
 
-def _bg_playlist(brand_id: str, tid: str, genre_overrides: dict | None = None):
+def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None):
     try:
         brands = get_brands()
         brand  = brands.get(brand_id)
@@ -414,6 +467,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: dict | None = None):
 
         assembled = []
         n = max(len(day_parts), 1)
+        used_song_ids: set = set()   # cross-day-part dedup: tracks used in earlier parts
 
         for idx, dp in enumerate(day_parts):
             dp_name = dp.get("name", f"Day-Part {idx+1}")
@@ -432,6 +486,17 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: dict | None = None):
                 continue
             if stats.get("skipped"):
                 task_log(tid, f"  {dp_name}: few candidates ({len(candidates)}), proceeding...")
+
+            # ── Cross-day-part dedup ───────────────────────────────────────────
+            # Remove songs already used in a previous day-part.
+            # Fall back to the full candidate list only when dedup leaves too few.
+            MIN_FRESH = 5
+            fresh_candidates = [c for c in candidates if c.get("song_id") not in used_song_ids]
+            if len(fresh_candidates) >= MIN_FRESH:
+                candidates = fresh_candidates
+                task_log(tid, f"  {dp_name}: {len(candidates)} fresh candidates after cross-part dedup")
+            else:
+                task_log(tid, f"  {dp_name}: catalog too small for full dedup, reusing pool")
 
             target_n   = target_track_count(dp)
             must_inc   = fetch_must_include_tracks(include_list, candidates, target_n)
@@ -461,6 +526,12 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: dict | None = None):
                 target_seconds = target_seconds,
                 lam            = MMR_LAMBDA,
             )
+
+            # Record which songs were used so later day-parts skip them
+            for t in playlist:
+                sid = t.get("song_id")
+                if sid:
+                    used_song_ids.add(sid)
 
             if playlist:
                 task_log(tid, f"  {dp_name}: {len(playlist)} tracks selected (MMR λ={MMR_LAMBDA})")
@@ -509,7 +580,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: dict | None = None):
 
 # ─── Routes: Debug ────────────────────────────────────────────────────────────
 
-@app.get("/api/debug/search")
+@superadmin_router.get("/api/debug/search")
 def debug_search():
     try:
         zero_vec = "[" + ",".join(["0.0"] * 1536) + "]"
@@ -532,7 +603,7 @@ def debug_search():
 
 # ─── Routes: Dashboard ────────────────────────────────────────────────────────
 
-@app.get("/api/stats")
+@protected_router.get("/api/stats")
 def stats():
     brands    = get_brands()
     playlists = get_playlists()
@@ -551,19 +622,19 @@ def stats():
     }
 
 
-@app.get("/api/activity")
+@protected_router.get("/api/activity")
 def activity():
     return [{"time_ago": _time_ago(a["timestamp"]), **a} for a in _activity[:10]]
 
 
 # ─── Routes: Brands ───────────────────────────────────────────────────────────
 
-@app.get("/api/brands")
+@protected_router.get("/api/brands")
 def list_brands():
     return list(get_brands().values())
 
 
-@app.post("/api/brands")
+@protected_router.post("/api/brands")
 async def create_brand(req: Request):
     data     = await req.json()
     brand_id = str(uuid.uuid4())
@@ -601,7 +672,7 @@ async def create_brand(req: Request):
     return brand
 
 
-@app.delete("/api/brands/{brand_id}")
+@protected_router.delete("/api/brands/{brand_id}")
 def delete_brand(brand_id: str):
     brands = get_brands()
     if brand_id not in brands:
@@ -615,7 +686,7 @@ def delete_brand(brand_id: str):
     return {"ok": True}
 
 
-@app.post("/api/analyze-assets-preview")
+@protected_router.post("/api/analyze-assets-preview")
 async def analyze_assets_preview(files: list[UploadFile] = File(...)):
     import base64, fitz
 
@@ -706,7 +777,7 @@ Only include genres from this list: Pop, House, Chillout, Indie, Lounge, Afro Po
     }
 
 
-@app.post("/api/brands/{brand_id}/assets")
+@protected_router.post("/api/brands/{brand_id}/assets")
 async def upload_assets(brand_id: str, files: list[UploadFile] = File(...)):
     import base64, fitz
 
@@ -784,7 +855,7 @@ async def upload_assets(brand_id: str, files: list[UploadFile] = File(...)):
 
 # ─── Routes: Catalog ──────────────────────────────────────────────────────────
 
-@app.get("/api/catalog/stats")
+@protected_router.get("/api/catalog/stats")
 def catalog_stats():
     try:
         r = get_supabase().table("songs").select("id", count="exact").execute()
@@ -793,7 +864,7 @@ def catalog_stats():
         return {"total_songs": 0, "db": "Supabase", "status": "error", "error": str(e)}
 
 
-@app.get("/api/catalog/songs")
+@protected_router.get("/api/catalog/songs")
 def catalog_songs():
     try:
         r = get_supabase().table("songs").select(
@@ -841,7 +912,7 @@ suggested_customer_types: 4-6 types of people who visit this type of place (e.g.
 suggested_lifestyle: 4-6 lifestyle descriptors typical for this type of venue (e.g. for hotel: "Urban professional", "Leisure traveler", "Health-conscious")"""
 
 
-@app.post("/api/quick-analyze")
+@protected_router.post("/api/quick-analyze")
 async def quick_analyze(req: Request):
     data = await req.json()
     brand_name  = data.get("brand_name", "")
@@ -865,7 +936,7 @@ async def quick_analyze(req: Request):
 
 # ─── Routes: Generation ───────────────────────────────────────────────────────
 
-@app.post("/api/soundboard/{brand_id}")
+@protected_router.post("/api/soundboard/{brand_id}")
 def start_soundboard(brand_id: str):
     if brand_id not in get_brands():
         raise HTTPException(404, "Brand not found")
@@ -881,7 +952,7 @@ class GenreOverrides(BaseModel):
 class GenerateRequest(BaseModel):
     genre_overrides: GenreOverrides = GenreOverrides()
 
-@app.post("/api/generate/{brand_id}")
+@protected_router.post("/api/generate/{brand_id}")
 def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest()):
     if brand_id not in get_brands():
         raise HTTPException(404, "Brand not found")
@@ -891,7 +962,7 @@ def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest()):
     return {"task_id": tid}
 
 
-@app.get("/api/generate/status/{task_id}")
+@protected_router.get("/api/generate/status/{task_id}")
 def generation_status(task_id: str):
     t = _tasks.get(task_id)
     if not t:
@@ -899,7 +970,7 @@ def generation_status(task_id: str):
     return t
 
 
-@app.put("/api/brands/{brand_id}/soundboard")
+@protected_router.put("/api/brands/{brand_id}/soundboard")
 async def update_soundboard_targets(brand_id: str, req: Request):
     brands = get_brands()
     if brand_id not in brands:
@@ -924,7 +995,7 @@ async def update_soundboard_targets(brand_id: str, req: Request):
     return {"ok": True, "updated_keys": list(targets.keys())}
 
 
-@app.put("/api/brands/{brand_id}/dayparts")
+@protected_router.put("/api/brands/{brand_id}/dayparts")
 async def update_dayparts(brand_id: str, req: Request):
     brands = get_brands()
     if brand_id not in brands:
@@ -952,7 +1023,7 @@ async def update_dayparts(brand_id: str, req: Request):
     return {"ok": True, "updated": len(incoming)}
 
 
-@app.put("/api/brands/{brand_id}/profile")
+@protected_router.put("/api/brands/{brand_id}/profile")
 async def update_brand_profile(brand_id: str, req: Request):
     brands = get_brands()
     if brand_id not in brands:
@@ -969,7 +1040,7 @@ async def update_brand_profile(brand_id: str, req: Request):
     return {"ok": True, "updated": updates}
 
 
-@app.get("/api/playlists/{brand_id}")
+@protected_router.get("/api/playlists/{brand_id}")
 def get_playlist(brand_id: str):
     pl = get_playlists().get(brand_id)
     if not pl:
@@ -980,7 +1051,7 @@ def get_playlist(brand_id: str):
     return pl
 
 
-@app.get("/api/debug/songs")
+@superadmin_router.get("/api/debug/songs")
 def debug_songs():
     idx = _build_file_index()
     sample = []
@@ -1002,5 +1073,78 @@ def serve_song(path: str):
     return FileResponse(str(file_path), media_type="audio/mpeg")
 
 
+# ─── Routes: Public ───────────────────────────────────────────────────────────
+
+@public_router.get("/api/config")
+async def public_config():
+    """Returns browser-safe Supabase config for the login page."""
+    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_ANON_KEY}
+
+
+# ─── Routes: Auth / Me ────────────────────────────────────────────────────────
+
+@protected_router.get("/api/auth/me")
+async def auth_me(
+    user: dict = Depends(get_current_user),
+    role: str  = Depends(get_current_role),
+):
+    return {"id": user["id"], "email": user.get("email", ""), "role": role}
+
+
+# ─── Routes: IAM (superadmin only) ───────────────────────────────────────────
+
+class RoleUpdate(BaseModel):
+    role: str
+
+
+@superadmin_router.get("/api/iam/users")
+async def iam_list_users():
+    """List all Supabase Auth users with their roles."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/auth/v1/admin/users?per_page=1000",
+            headers={
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "apikey": SUPABASE_SERVICE_KEY,
+            },
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(500, "Could not fetch users from Supabase")
+
+    auth_users = resp.json().get("users", [])
+    roles_resp = get_supabase().table("user_roles").select("user_id,role").execute()
+    roles_map  = {r["user_id"]: r["role"] for r in (roles_resp.data or [])}
+
+    return [
+        {
+            "id":          u["id"],
+            "email":       u.get("email", ""),
+            "role":        roles_map.get(u["id"], "viewer"),
+            "created_at":  u.get("created_at", ""),
+            "last_sign_in": u.get("last_sign_in_at", ""),
+        }
+        for u in auth_users
+    ]
+
+
+@superadmin_router.put("/api/iam/users/{user_id}/role")
+async def iam_update_role(user_id: str, body: RoleUpdate):
+    if body.role not in {"superadmin", "admin", "viewer"}:
+        raise HTTPException(400, "Invalid role. Must be superadmin, admin, or viewer")
+    get_supabase().table("user_roles").upsert(
+        {"user_id": user_id, "role": body.role},
+        on_conflict="user_id",
+    ).execute()
+    return {"ok": True, "user_id": user_id, "role": body.role}
+
+
+# ─── Mount routers ────────────────────────────────────────────────────────────
+
+app.include_router(public_router)
+app.include_router(protected_router)
+app.include_router(superadmin_router)
+
+
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="127.0.0.1", port=8001, reload=False)
+    uvicorn.run("backend.api:app", host="127.0.0.1", port=8001, reload=False)

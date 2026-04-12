@@ -11,7 +11,7 @@ import time
 
 from openai import AzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
 
-from day_part_templates import DAY_PART_TEMPLATES
+from brand_pipeline.day_part_templates import DAY_PART_TEMPLATES
 
 logger = logging.getLogger(__name__)
 

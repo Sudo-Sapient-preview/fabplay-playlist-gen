@@ -54,17 +54,13 @@ def compute_mmr_score(candidate: dict, dp: dict, selected: list[dict], lam: floa
 
 
 def _fill_to_duration(ordered: list[dict], target_seconds: float, target_count: int) -> list[dict]:
-    if not ordered:
-        return []
-    playlist, total_duration = [], 0.0
-    n, max_tracks = len(ordered), len(ordered) * 5
-    while len(playlist) < max_tracks:
-        track = ordered[len(playlist) % n]
-        playlist.append(track)
-        total_duration += float(track.get("duration_seconds", 210))
-        if total_duration >= target_seconds and len(playlist) >= target_count:
-            break
-    return playlist
+    """
+    Never repeat songs in the displayed playlist.
+    If the unique pool is exhausted before hitting target_seconds / target_count,
+    just return what we have — better to show 30 unique tracks than 75 with heavy
+    repetition.  Looping / shuffling is a playback-layer concern.
+    """
+    return ordered
 
 
 def mmr_select(

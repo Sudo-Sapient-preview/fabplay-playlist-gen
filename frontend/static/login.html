@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fabPLAY — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #F9F8F5;
+    --surface: #FFFFFF;
+    --bdr:     #E8E5DE;
+    --text:    #1A1714;
+    --muted:   #6B6560;
+    --faint:   #A09990;
+    --accent:  #C0392B;
+    --accent-h:#A93226;
+    --radius:  10px;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .login-wrap {
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .login-logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 32px;
+  }
+
+  .login-logo img {
+    height: 48px;
+    width: auto;
+    object-fit: contain;
+  }
+
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--bdr);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+
+  /* Tab toggle */
+  .tab-row {
+    display: flex;
+    border: 1px solid var(--bdr);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 9px 0;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .login-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    text-align: center;
+  }
+
+  .login-sub {
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .field {
+    margin-bottom: 16px;
+  }
+
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  input[type="email"],
+  input[type="password"],
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 13px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid var(--bdr);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus { border-color: var(--accent); }
+
+  .btn-submit {
+    width: 100%;
+    padding: 11px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-submit:hover:not(:disabled) { background: var(--accent-h); }
+  .btn-submit:disabled { opacity: 0.65; cursor: not-allowed; }
+
+  .error-box {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #991B1B;
+    border-radius: 7px;
+    padding: 10px 13px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+
+  .success-box {
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    color: #166534;
+    border-radius: 7px;
+    padding: 10px 13px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .login-footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--faint);
+    margin-top: 20px;
+  }
+
+  .pw-hint {
+    font-size: 11px;
+    color: var(--faint);
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="login-wrap" x-data="{
+  mode: 'signin',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  fullName: '',
+  loading: false,
+  error: '',
+  success: '',
+  cfg: null,
+
+  async init() {
+    // Clear any stale/expired session so the dashboard bounce doesn't happen
+    localStorage.removeItem('fabplay_token');
+    localStorage.removeItem('fabplay_refresh');
+    localStorage.removeItem('fabplay_user');
+    document.cookie = 'fabplay_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  },
+
+  async getConfig() {
+    if (this.cfg) return this.cfg;
+    this.cfg = await fetch('/api/config').then(r => r.json());
+    return this.cfg;
+  },
+
+  switchMode(m) {
+    this.mode = m;
+    this.error = '';
+    this.success = '';
+    this.password = '';
+    this.confirmPassword = '';
+  },
+
+  async signin() {
+    if (!this.email || !this.password) {
+      this.error = 'Please enter your email and password.';
+      return;
+    }
+    this.loading = true;
+    this.error = '';
+    try {
+      const cfg = await this.getConfig();
+      const r = await fetch(cfg.supabase_url + '/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': cfg.supabase_anon_key },
+        body: JSON.stringify({ email: this.email, password: this.password })
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        this.error = data.error_description || data.msg || 'Invalid email or password.';
+        return;
+      }
+      localStorage.setItem('fabplay_token',  data.access_token);
+      localStorage.setItem('fabplay_refresh', data.refresh_token);
+      localStorage.setItem('fabplay_user',    JSON.stringify(data.user));
+      document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
+      window.location.href = '/dashboard';
+    } catch(e) {
+      this.error = 'Connection error. Please try again.';
+    } finally {
+      this.loading = false;
+    }
+  },
+
+  async signup() {
+    if (!this.email || !this.password) {
+      this.error = 'Please fill in all fields.';
+      return;
+    }
+    if (this.password.length < 6) {
+      this.error = 'Password must be at least 6 characters.';
+      return;
+    }
+    if (this.password !== this.confirmPassword) {
+      this.error = 'Passwords do not match.';
+      return;
+    }
+    this.loading = true;
+    this.error = '';
+    this.success = '';
+    try {
+      const cfg = await this.getConfig();
+      const r = await fetch(cfg.supabase_url + '/auth/v1/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': cfg.supabase_anon_key },
+        body: JSON.stringify({
+          email: this.email,
+          password: this.password,
+          data: { full_name: this.fullName },
+          redirect_to: window.location.origin + '/auth/callback'
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        this.error = data.error_description || data.msg || 'Sign up failed. Please try again.';
+        return;
+      }
+      // If email confirmation is disabled, we get a session immediately — auto-login
+      if (data.access_token) {
+        localStorage.setItem('fabplay_token',  data.access_token);
+        localStorage.setItem('fabplay_refresh', data.refresh_token);
+        localStorage.setItem('fabplay_user',    JSON.stringify(data.user));
+        document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
+        window.location.href = '/dashboard';
+      } else {
+        // Email confirmation required
+        this.success = 'Account created! Check your email to confirm, then sign in.';
+        this.switchMode('signin');
+      }
+    } catch(e) {
+      this.error = 'Connection error. Please try again.';
+    } finally {
+      this.loading = false;
+    }
+  }
+}" x-init="init()">
+
+  <div class="login-logo">
+    <img src="/static/logo.jpg" alt="fabPLAY">
+  </div>
+
+  <div class="login-card">
+
+    <!-- Tab Toggle -->
+    <div class="tab-row">
+      <button class="tab-btn" :class="mode==='signin'?'active':''" @click="switchMode('signin')">Sign In</button>
+      <button class="tab-btn" :class="mode==='signup'?'active':''" @click="switchMode('signup')">Create Account</button>
+    </div>
+
+    <!-- Error / Success -->
+    <div x-show="error" class="error-box" x-text="error"></div>
+    <div x-show="success" class="success-box" x-text="success"></div>
+
+    <!-- ── Sign In Form ── -->
+    <form x-show="mode==='signin'" @submit.prevent="signin()">
+      <div class="field">
+        <label for="si-email">Email</label>
+        <input id="si-email" type="email" x-model="email" placeholder="you@example.com" autocomplete="email" :disabled="loading">
+      </div>
+      <div class="field">
+        <label for="si-password">Password</label>
+        <input id="si-password" type="password" x-model="password" placeholder="••••••••" autocomplete="current-password" :disabled="loading">
+      </div>
+      <button type="submit" class="btn-submit" :disabled="loading">
+        <span x-show="loading" class="spinner"></span>
+        <span x-text="loading ? 'Signing in…' : 'Sign In'"></span>
+      </button>
+    </form>
+
+    <!-- ── Sign Up Form ── -->
+    <form x-show="mode==='signup'" @submit.prevent="signup()">
+      <div class="field">
+        <label for="su-name">Full Name <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+        <input id="su-name" type="text" x-model="fullName" placeholder="Jane Smith" autocomplete="name" :disabled="loading">
+      </div>
+      <div class="field">
+        <label for="su-email">Email</label>
+        <input id="su-email" type="email" x-model="email" placeholder="you@example.com" autocomplete="email" :disabled="loading">
+      </div>
+      <div class="field">
+        <label for="su-password">Password</label>
+        <input id="su-password" type="password" x-model="password" placeholder="••••••••" autocomplete="new-password" :disabled="loading">
+        <div class="pw-hint">Minimum 6 characters</div>
+      </div>
+      <div class="field">
+        <label for="su-confirm">Confirm Password</label>
+        <input id="su-confirm" type="password" x-model="confirmPassword" placeholder="••••••••" autocomplete="new-password" :disabled="loading">
+      </div>
+      <button type="submit" class="btn-submit" :disabled="loading">
+        <span x-show="loading" class="spinner"></span>
+        <span x-text="loading ? 'Creating account…' : 'Create Account'"></span>
+      </button>
+    </form>
+
+  </div>
+
+  <div class="login-footer">fabPLAY Brand Intelligence</div>
+</div>
+
+</body>
+</html>
