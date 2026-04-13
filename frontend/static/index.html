@@ -374,7 +374,19 @@
           </div>
         </div>
         <div style="cursor:pointer;transition:opacity 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;" class="hover:opacity-75" @click="showRadarModal=true; $nextTick(() => initSbChartsModal())" title="Click to enlarge — drag points to edit">
-          <canvas id="sb-radar" width="220" height="220"></canvas>
+          <svg viewBox="0 0 220 220" width="220" height="220" aria-label="Aaker brand radar">
+            <polygon :points="aakerRingPoints(1)" fill="none" stroke="rgba(140,140,140,0.35)" stroke-width="1"></polygon>
+            <polygon :points="aakerRingPoints(0.75)" fill="none" stroke="rgba(140,140,140,0.25)" stroke-width="1"></polygon>
+            <polygon :points="aakerRingPoints(0.5)" fill="none" stroke="rgba(140,140,140,0.20)" stroke-width="1"></polygon>
+            <polygon :points="aakerRingPoints(0.25)" fill="none" stroke="rgba(140,140,140,0.18)" stroke-width="1"></polygon>
+            <template x-for="i in [0,1,2,3,4]" :key="'axis-'+i">
+              <line x1="110" y1="110" :x2="aakerAxisLineX(i)" :y2="aakerAxisLineY(i)" stroke="rgba(140,140,140,0.25)" stroke-width="1"></line>
+            </template>
+            <polygon :points="aakerDataPoints()" fill="rgba(192,57,43,0.22)" stroke="rgba(192,57,43,0.95)" stroke-width="2"></polygon>
+            <template x-for="i in [0,1,2,3,4]" :key="'lbl-'+i">
+              <text :x="aakerLabelX(i)" :y="aakerLabelY(i)" text-anchor="middle" dominant-baseline="middle" style="font-size:10px;fill:var(--faint);font-family:'Space Grotesk',sans-serif" x-text="aakerLabel(i)"></text>
+            </template>
+          </svg>
           <p class="text-xs mt-2" style="color:var(--faint);letter-spacing:.05em">Aaker Brand Personality</p>
         </div>
       </div>
@@ -713,6 +725,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

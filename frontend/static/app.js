@@ -637,6 +637,50 @@ return {
 
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
 
+  aakerProfileVals(){
+    const p=this.curBrand?.brand_profile||this.curPl?.brand_profile||{};
+    return [
+      Number(p.sincerity ?? 0.5),
+      Number(p.excitement ?? 0.5),
+      Number(p.competence ?? 0.5),
+      Number(p.sophistication ?? 0.5),
+      Number(p.ruggedness ?? 0.5),
+    ].map(v=>Math.max(0,Math.min(1,v)));
+  },
+  _aakerPoint(i,val,cx=110,cy=110,r=70){
+    const a=-Math.PI/2 + (i*2*Math.PI)/5;
+    const rr=r*val;
+    return `${(cx+rr*Math.cos(a)).toFixed(2)},${(cy+rr*Math.sin(a)).toFixed(2)}`;
+  },
+  aakerRingPoints(scale=1,cx=110,cy=110,r=70){
+    const pts=[];
+    for(let i=0;i<5;i++) pts.push(this._aakerPoint(i,scale,cx,cy,r));
+    return pts.join(' ');
+  },
+  aakerDataPoints(cx=110,cy=110,r=70){
+    const vals=this.aakerProfileVals();
+    return vals.map((v,i)=>this._aakerPoint(i,v,cx,cy,r)).join(' ');
+  },
+  aakerAxisLineX(i,cx=110,r=70){
+    const a=-Math.PI/2 + (i*2*Math.PI)/5;
+    return (cx+r*Math.cos(a)).toFixed(2);
+  },
+  aakerAxisLineY(i,cy=110,r=70){
+    const a=-Math.PI/2 + (i*2*Math.PI)/5;
+    return (cy+r*Math.sin(a)).toFixed(2);
+  },
+  aakerLabelX(i,cx=110,r=70){
+    const a=-Math.PI/2 + (i*2*Math.PI)/5;
+    return (cx+(r+16)*Math.cos(a)).toFixed(2);
+  },
+  aakerLabelY(i,cy=110,r=70){
+    const a=-Math.PI/2 + (i*2*Math.PI)/5;
+    return (cy+(r+16)*Math.sin(a)).toFixed(2);
+  },
+  aakerLabel(i){
+    return ['Sincerity','Excitement','Competence','Sophistication','Ruggedness'][i];
+  },
+
   _drawRadarFallback(canvas, profile, large=false){
     if(!canvas) return;
     const ctx=canvas.getContext('2d');
