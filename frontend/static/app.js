@@ -134,7 +134,7 @@ return {
         await this.loadBrands();
         const b=this.brands.find(x=>x.id===this.curBrand.id);
         if(b)this.curBrand=b;
-        setTimeout(()=>this.initSbCharts(),80);
+        this.scheduleSbChartsInit();
       }
       if(val==='playlists' && this.curBrand && !this.curPl){
         try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
@@ -171,9 +171,28 @@ return {
     this._origRanges={};
     this.hasUnsavedChanges=false;
     this.page='soundboard';
-    setTimeout(()=>this.initSbCharts(),80);
+    this.scheduleSbChartsInit();
     // Load playlist in background — don't block soundboard render
-    this.apiFetch('/api/playlists/'+id).then(r=>{if(r&&r.ok)r.json().then(d=>this.curPl=d)}).catch(()=>{});
+    this.apiFetch('/api/playlists/'+id).then(r=>{
+      if(r&&r.ok)r.json().then(d=>{
+        this.curPl=d;
+        this.scheduleSbChartsInit();
+      })
+    }).catch(()=>{});
+  },
+
+  scheduleSbChartsInit(retries=8){
+    this.$nextTick(()=>{
+      const rc=document.getElementById('sb-radar');
+      const tc=document.getElementById('sb-timeline');
+      if(rc||tc){
+        this.initSbCharts();
+        return;
+      }
+      if(retries>0){
+        setTimeout(()=>this.scheduleSbChartsInit(retries-1),100);
+      }
+    });
   },
 
   _saveGenreOverrides(){
@@ -317,10 +336,10 @@ return {
               const b=this.brands.find(x=>x.id===brandId);
               if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
               this.showGen=false;
-              setTimeout(()=>this.initSbCharts(),80);
+              this.scheduleSbChartsInit();
             } else {
               this.showGen=false;
-              setTimeout(()=>this.initSbCharts(),80);
+              this.scheduleSbChartsInit();
             }
           }
         }
@@ -360,7 +379,7 @@ return {
         if(latest)this.curBrand=latest;
       }
       this.hasUnsavedChanges=false;
-      setTimeout(()=>this.initSbCharts(),80);
+      this.scheduleSbChartsInit();
     }catch(e){
       console.warn('Could not persist all changes:',e);
       alert('Could not save all changes. Please try again.');
@@ -409,7 +428,7 @@ return {
               this.showGen=false;
               this.genTask=null;
               this.page='playlists';
-              setTimeout(()=>this.initSbCharts(),80);
+              this.scheduleSbChartsInit();
               // Refresh sidebar data in background (non-blocking)
               Promise.all([this.loadBrands(),this.loadStats(),this.loadActivity()]);
             }
@@ -499,7 +518,6 @@ return {
     p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
     this.hasUnsavedChanges=true;
     this._refreshTimeline();
-    this.saveTargets();
   },
 
   _refreshTimeline(){
@@ -603,6 +621,7 @@ return {
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
 
   initSbCharts(){
+    if(typeof Chart==='undefined') return;
     const brand=this.curBrand;const pl=this.curPl;
     if(!brand&&!pl)return;
     const profile=pl?.brand_profile||brand?.brand_profile||{};
@@ -686,7 +705,6 @@ return {
                 else dpsRef[index].valence_target=clamped;
                 this.hasUnsavedChanges=true;
                 this.sbVersion++; // triggers sbAudioParams() to re-run for active dp
-                this.saveDayPartData();
               }
             }
           },
@@ -696,14 +714,15 @@ return {
           }
         }
       });
-      // Show grab cursor on hover over the chart
+      // Avoid duplicate listeners on repeated chart inits.
       tc.style.cursor='default';
-      tc.addEventListener('mousemove',()=>{ if(tc.style.cursor!=='grabbing')tc.style.cursor='grab'; });
-      tc.addEventListener('mouseleave',()=>{ tc.style.cursor='default'; });
+      tc.onmousemove=()=>{ if(tc.style.cursor!=='grabbing')tc.style.cursor='grab'; };
+      tc.onmouseleave=()=>{ tc.style.cursor='default'; };
     }
   },
 
   initSbChartsModal(){
+    if(typeof Chart==='undefined') return;
     const brand=this.curBrand;const pl=this.curPl;
     if(!brand&&!pl)return;
     const profile=brand?.brand_profile||pl?.brand_profile||{};
@@ -757,15 +776,15 @@ return {
                 // Sync small radar with full profile data (robust — no stale index issues)
                 this._syncSmallRadar();
                 this.hasUnsavedChanges=true;
-                this.saveProfileData();
               }
             }
           }
         }
       });
+      // Avoid duplicate listeners on repeated modal open/close.
       rc.style.cursor='default';
-      rc.addEventListener('mousemove',()=>{if(rc.style.cursor!=='grabbing')rc.style.cursor='grab';});
-      rc.addEventListener('mouseleave',()=>{rc.style.cursor='default';});
+      rc.onmousemove=()=>{if(rc.style.cursor!=='grabbing')rc.style.cursor='grab';};
+      rc.onmouseleave=()=>{rc.style.cursor='default';};
     }
   },
 
@@ -799,7 +818,7 @@ return {
           if(data?.brand_profile)this.curBrand.brand_profile=data.brand_profile;
           if(data?.sound_board_result)this.curBrand.sound_board_result=data.sound_board_result;
           this._syncSmallRadar();
-          setTimeout(()=>this.initSbCharts(),80);
+          this.scheduleSbChartsInit();
           await this.loadBrands();
           const latest=this.brands.find(x=>x.id===this.curBrand.id);
           if(latest)this.curBrand=latest;
