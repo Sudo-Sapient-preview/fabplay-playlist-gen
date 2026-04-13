@@ -37,6 +37,7 @@ return {
   sbGenreOverrides: {include:[], exclude:[]},
   sbShowAddGenre: false,
   hasUnsavedChanges: false,
+  profileDirty: false,
   sbVersion: 0,
   _sbSaveTimer: null,
   _dpSaveTimer: null,
@@ -179,6 +180,7 @@ return {
     this._origTargets={};
     this._origRanges={};
     this.hasUnsavedChanges=false;
+    this.profileDirty=false;
     this.page='soundboard';
     this.scheduleSbChartsInit();
     // Load playlist in background — don't block soundboard render
@@ -374,7 +376,7 @@ return {
         saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})}));
       }
     }
-    if(this.curBrand?.brand_profile){
+    if(this.profileDirty&&this.curBrand?.brand_profile){
       const p=this.curBrand.brand_profile;
       saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})}));
     }
@@ -390,6 +392,7 @@ return {
         if(latest)this.curBrand=latest;
       }
       this.hasUnsavedChanges=false;
+      this.profileDirty=false;
       this.scheduleSbChartsInit();
     }catch(e){
       console.warn('Could not persist all changes:',e);
@@ -909,6 +912,7 @@ return {
                 // Sync small radar with full profile data (robust — no stale index issues)
                 this._syncSmallRadar();
                 this.hasUnsavedChanges=true;
+                this.profileDirty=true;
               }
             }
           }
