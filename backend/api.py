@@ -1157,9 +1157,6 @@ async def update_soundboard_targets(brand_id: str, req: Request):
     sb = sb_result.setdefault("sound_board", {})
     for key, val in targets.items():
         sb[key] = val
-    for dp in sb_result.get("day_parts", []):
-        for key, val in targets.items():
-            dp[key] = val
     brands[brand_id]["sound_board_result"] = sb_result
     brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()
     save_brands(brands)

@@ -362,28 +362,33 @@ return {
 
   async applyChanges(){
     if(!this.curBrand?.id)return;
-    const saves=[];
+    let soundboardReq=null;
+    let daypartsReq=null;
+    let profileReq=null;
     if(this.curBrand?.sound_board_result){
       const sb=this.curBrand.sound_board_result?.sound_board||{};
       const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
       const targets={};keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
       const dps=this.curBrand.sound_board_result?.day_parts;
-      if(Object.keys(targets).length)saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})}));
+      if(Object.keys(targets).length)soundboardReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})});
       if(dps?.length){
         const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
-        saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})}));
+        daypartsReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})});
       }
     }
     if(this.profileDirty&&this.curBrand?.brand_profile){
       const p=this.curBrand.brand_profile;
-      saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})}));
+      profileReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})});
     }
     // Clear debounce timers and mark as saved immediately — saves run in background
     if(this._sbSaveTimer){clearTimeout(this._sbSaveTimer);this._sbSaveTimer=null;}
     if(this._dpSaveTimer){clearTimeout(this._dpSaveTimer);this._dpSaveTimer=null;}
     if(this._profileSaveTimer){clearTimeout(this._profileSaveTimer);this._profileSaveTimer=null;}
     try{
-      await Promise.all(saves);
+      // Deterministic order prevents race-based value rollbacks.
+      if(profileReq) await profileReq();
+      if(soundboardReq) await soundboardReq();
+      if(daypartsReq) await daypartsReq();
       await this.loadBrands();
       if(this.curBrand?.id){
         const latest=this.brands.find(x=>x.id===this.curBrand.id);
