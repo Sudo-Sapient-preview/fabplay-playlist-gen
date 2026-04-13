@@ -637,8 +637,68 @@ return {
 
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
 
+  _drawRadarFallback(canvas, profile, large=false){
+    if(!canvas) return;
+    const ctx=canvas.getContext('2d');
+    if(!ctx) return;
+    const labels=['Sincerity','Excitement','Competence','Sophistication','Ruggedness'];
+    const vals=[
+      Number(profile?.sincerity||0),
+      Number(profile?.excitement||0),
+      Number(profile?.competence||0),
+      Number(profile?.sophistication||0),
+      Number(profile?.ruggedness||0),
+    ];
+    const w=canvas.width, h=canvas.height;
+    const cx=w/2, cy=h/2;
+    const r=Math.max(30, Math.min(w,h)*(large?0.33:0.30));
+    const rings=4, n=labels.length;
+
+    ctx.clearRect(0,0,w,h);
+    ctx.save();
+    ctx.strokeStyle='rgba(160,160,160,0.35)';
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    ctx.lineWidth=1;
+
+    for(let k=1;k<=rings;k++){
+      const rr=(r*k)/rings;
+      ctx.beginPath();
+      for(let i=0;i<n;i++){
+        const a=-Math.PI/2 + (i*2*Math.PI)/n;
+        const x=cx + rr*Math.cos(a), y=cy + rr*Math.sin(a);
+        if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    for(let i=0;i<n;i++){
+      const a=-Math.PI/2 + (i*2*Math.PI)/n;
+      const x=cx + r*Math.cos(a), y=cy + r*Math.sin(a);
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(x,y); ctx.stroke();
+      const lx=cx + (r+14)*Math.cos(a), ly=cy + (r+14)*Math.sin(a);
+      ctx.font=large?'12px \"Space Grotesk\", sans-serif':'10px \"Space Grotesk\", sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(labels[i], lx, ly);
+    }
+
+    ctx.beginPath();
+    for(let i=0;i<n;i++){
+      const a=-Math.PI/2 + (i*2*Math.PI)/n;
+      const vv=Math.max(0,Math.min(1,vals[i]));
+      const x=cx + (r*vv)*Math.cos(a), y=cy + (r*vv)*Math.sin(a);
+      if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+    ctx.fillStyle='rgba(192,57,43,0.22)';
+    ctx.strokeStyle='rgba(192,57,43,0.9)';
+    ctx.lineWidth=2;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  },
+
   initSbCharts(){
-    if(typeof Chart==='undefined') return;
     const brand=this.curBrand;const pl=this.curPl;
     if(!brand&&!pl)return;
     const profile=brand?.brand_profile||pl?.brand_profile||{};
@@ -648,7 +708,15 @@ return {
     const rc=document.getElementById('sb-radar');
     if(rc){
       rc.width=220;rc.height=220;
-      this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:false,layout:{padding:16},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:10}}}},plugins:{legend:{display:false},dragData:false}}});
+      if(typeof Chart==='undefined'){
+        this._drawRadarFallback(rc, profile, false);
+      } else {
+        try{
+          this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:false,layout:{padding:16},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:10}}}},plugins:{legend:{display:false},dragData:false}}});
+        }catch(e){
+          this._drawRadarFallback(rc, profile, false);
+        }
+      }
     }
     const tc=document.getElementById('sb-timeline');
     if(tc&&dps.length){
@@ -739,7 +807,6 @@ return {
   },
 
   initSbChartsModal(){
-    if(typeof Chart==='undefined') return;
     const brand=this.curBrand;const pl=this.curPl;
     if(!brand&&!pl)return;
     const profile=brand?.brand_profile||pl?.brand_profile||{};
@@ -747,10 +814,15 @@ return {
     const rc=document.getElementById('sb-radar-lg');
     if(rc){
       rc.width=380;rc.height=380;
+      if(typeof Chart==='undefined'){
+        this._drawRadarFallback(rc, profile, true);
+        return;
+      }
       const DIMS=['sincerity','excitement','competence','sophistication','ruggedness'];
       const profileRef=profile;
       const round2=v=>Math.round(v*100)/100;
-      this.sbCharts.radarLg=new Chart(rc,{
+      try{
+        this.sbCharts.radarLg=new Chart(rc,{
         type:'radar',
         data:{
           labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],
@@ -798,6 +870,10 @@ return {
           }
         }
       });
+      }catch(e){
+        this._drawRadarFallback(rc, profile, true);
+        return;
+      }
       // Avoid duplicate listeners on repeated modal open/close.
       rc.style.cursor='default';
       rc.onmousemove=()=>{if(rc.style.cursor!=='grabbing')rc.style.cursor='grab';};
