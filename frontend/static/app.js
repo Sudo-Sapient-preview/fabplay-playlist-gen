@@ -367,9 +367,7 @@ return {
       const sb=this.curBrand.sound_board_result?.sound_board||{};
       const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
       const targets={};keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
-      // Sync all day_parts with global sound_board targets before saving
       const dps=this.curBrand.sound_board_result?.day_parts;
-      if(dps?.length)dps.forEach(dp=>{keys.forEach(k=>{if(targets[k]!==undefined)dp[k]=targets[k]})});
       if(Object.keys(targets).length)saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})}));
       if(dps?.length){
         const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
