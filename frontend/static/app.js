@@ -42,6 +42,7 @@ return {
   _dpSaveTimer: null,
   _profileSaveTimer: null,
   _tlRefreshTimer: null,
+  _sliderRaf: null,
   _origTargets: {},      // keyed by param.key, stores original AI midpoints
   _origRanges: {},       // keyed by param.key, stores frozen AI {min,max} for the pink band
   suggestions: {activities:[], lifestyle:[], customer_types:[]},
@@ -130,10 +131,12 @@ return {
     Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats()]);
 
     this.$watch('page', async val => {
-      if(val==='soundboard' && this.curBrand && !this.curBrand.sound_board_result){
-        await this.loadBrands();
-        const b=this.brands.find(x=>x.id===this.curBrand.id);
-        if(b)this.curBrand=b;
+      if(val==='soundboard'){
+        if(this.curBrand && !this.curBrand.sound_board_result){
+          await this.loadBrands();
+          const b=this.brands.find(x=>x.id===this.curBrand.id);
+          if(b)this.curBrand=b;
+        }
         this.scheduleSbChartsInit();
       }
       if(val==='playlists' && this.curBrand && !this.curPl){
@@ -505,18 +508,25 @@ return {
 
   updateTarget(p,valStr){
     const val=Number(valStr);
-    const sb=this.curBrand?.sound_board_result;
-    if(sb){
-      if(!sb.sound_board)sb.sound_board={};
-      sb.sound_board[p.key+'_target']=val;
-      // Only update active day_part during drag — full sync happens on applyChanges
-      const activeDp=sb.day_parts?.[this.activeDp];
-      if(activeDp)activeDp[p.key+'_target']=val;
+    const applyNow=()=>{
+      const sb=this.curBrand?.sound_board_result;
+      if(sb){
+        if(!sb.sound_board)sb.sound_board={};
+        sb.sound_board[p.key+'_target']=val;
+        // Only update active day_part during drag — full sync happens on applyChanges
+        const activeDp=sb.day_parts?.[this.activeDp];
+        if(activeDp)activeDp[p.key+'_target']=val;
+      }
+      p.target=val;
+      p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
+      p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
+      this.hasUnsavedChanges=true;
+      this._sliderRaf=null;
+    };
+    if(this._sliderRaf){
+      return;
     }
-    p.target=val;
-    p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
-    p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
-    this.hasUnsavedChanges=true;
+    this._sliderRaf=requestAnimationFrame(applyNow);
   },
 
   _refreshTimeline(){
