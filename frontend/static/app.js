@@ -517,7 +517,6 @@ return {
     p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
     p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
     this.hasUnsavedChanges=true;
-    this._refreshTimeline();
   },
 
   _refreshTimeline(){
@@ -624,7 +623,7 @@ return {
     if(typeof Chart==='undefined') return;
     const brand=this.curBrand;const pl=this.curPl;
     if(!brand&&!pl)return;
-    const profile=pl?.brand_profile||brand?.brand_profile||{};
+    const profile=brand?.brand_profile||pl?.brand_profile||{};
     const dps=(brand?.sound_board_result?.day_parts)||pl?.day_parts||[];
     if(this.sbCharts.radar){this.sbCharts.radar.destroy();this.sbCharts.radar=null}
     if(this.sbCharts.timeline){this.sbCharts.timeline.destroy();this.sbCharts.timeline=null}

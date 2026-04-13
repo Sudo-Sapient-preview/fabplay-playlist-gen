@@ -17,6 +17,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
+import xml.etree.ElementTree as ET
 
 import httpx
 import uvicorn
@@ -115,6 +116,48 @@ SONGS_MANIFEST = Path(__file__).parent.parent / "songs_manifest.json"
 _file_index: Optional[dict] = None
 
 
+def _build_blob_index(base_url: str) -> dict:
+    """
+    Build {filename -> blob relative path} by listing the Azure Blob container.
+    This lets us resolve DB filenames to nested blob keys like:
+      "folder/subfolder/track.mp3"
+    """
+    idx: dict[str, str] = {}
+    marker = ""
+    # Azure list API (public container): ?restype=container&comp=list
+    while True:
+        list_url = f"{base_url}/songs?restype=container&comp=list"
+        if marker:
+            list_url += f"&marker={quote(marker, safe='')}"
+        resp = httpx.get(list_url, timeout=20.0)
+        if resp.status_code != 200:
+            logger.warning("Blob list failed (%s): %s", resp.status_code, list_url)
+            break
+
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError:
+            logger.warning("Blob list XML parse failed")
+            break
+
+        blobs = root.find("Blobs")
+        if blobs is not None:
+            for blob in blobs.findall("Blob"):
+                name_el = blob.find("Name")
+                if name_el is None or not name_el.text:
+                    continue
+                rel = name_el.text.strip().replace("\\", "/")
+                fname = rel.split("/")[-1]
+                if fname.lower().endswith(".mp3"):
+                    idx[fname] = rel
+
+        next_marker_el = root.find("NextMarker")
+        marker = (next_marker_el.text or "").strip() if next_marker_el is not None else ""
+        if not marker:
+            break
+    return idx
+
+
 def _build_file_index() -> dict:
     global _file_index
     if _file_index is not None:
@@ -128,6 +171,9 @@ def _build_file_index() -> dict:
         import json as _json
         _file_index = _json.loads(SONGS_MANIFEST.read_text(encoding="utf-8"))
         logger.warning(f"Loaded songs manifest: {len(_file_index)} entries from {SONGS_MANIFEST}")
+    elif SONGS_BASE_URL and "blob.core.windows.net" in SONGS_BASE_URL:
+        _file_index = _build_blob_index(SONGS_BASE_URL)
+        logger.warning(f"Built blob songs index: {len(_file_index)} entries from {SONGS_BASE_URL}/songs")
     return _file_index
 
 
