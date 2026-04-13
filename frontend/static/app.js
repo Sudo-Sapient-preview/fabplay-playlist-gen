@@ -757,7 +757,7 @@ return {
     if(this.sbCharts.timeline){this.sbCharts.timeline.destroy();this.sbCharts.timeline=null}
     const rc=document.getElementById('sb-radar');
     if(rc){
-      rc.width=220;rc.height=220;
+      rc.width=250;rc.height=250;
       if(typeof Chart==='undefined'){
         this._drawRadarFallback(rc, profile, false);
       } else {
