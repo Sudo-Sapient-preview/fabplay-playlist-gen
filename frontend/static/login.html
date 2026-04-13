@@ -6,7 +6,7 @@
 <title>fabPLAY — Sign In</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -21,10 +21,12 @@
     --accent:  #C0392B;
     --accent-h:#A93226;
     --radius:  10px;
+    --font-body: "Space Grotesk", "Segoe UI", sans-serif;
+    --font-heading: "Fraunces", "Times New Roman", serif;
   }
 
   body {
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-body);
     background: var(--bg);
     min-height: 100vh;
     display: flex;
@@ -86,6 +88,7 @@
   .login-title {
     font-size: 20px;
     font-weight: 700;
+    font-family: var(--font-heading);
     color: var(--text);
     margin-bottom: 4px;
     text-align: center;

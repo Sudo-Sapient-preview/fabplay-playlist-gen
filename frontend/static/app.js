@@ -1,7 +1,8 @@
 /* ══════════ fabPLAY UI v2 — App Logic ══════════ */
 function app() {
 return {
-  page: 'dashboard',
+  page: '',
+  loading: true,
   brands: [],
   stats: {},
   activity: [],
@@ -35,9 +36,12 @@ return {
   sbCharts: {radar:null, timeline:null, radarLg:null},
   sbGenreOverrides: {include:[], exclude:[]},
   sbShowAddGenre: false,
+  hasUnsavedChanges: false,
+  sbVersion: 0,
   _sbSaveTimer: null,
   _dpSaveTimer: null,
   _profileSaveTimer: null,
+  _tlRefreshTimer: null,
   _origTargets: {},      // keyed by param.key, stores original AI midpoints
   _origRanges: {},       // keyed by param.key, stores frozen AI {min,max} for the pink band
   suggestions: {activities:[], lifestyle:[], customer_types:[]},
@@ -98,21 +102,39 @@ return {
     try {
       const me = await this.apiFetch('/api/auth/me');
       if (!me) return; // apiFetch already redirected to /login
-      const meData = await me.json();
-      this.currentUser = meData;
-      this.currentRole = meData.role;
-    } catch(e) { window.location.href = '/login'; return; }
+      if (me.status === 401) { window.location.href = '/login'; return; }
+      if (me.ok) {
+        const meData = await me.json();
+        this.currentUser = meData;
+        this.currentRole = meData.role;
+      } else {
+        console.warn('Auth check returned', me.status, '— continuing to routing');
+      }
+    } catch(e) { console.warn('Auth check error:', e); }
     // ── End auth preflight ──────────────────────
 
     this.player = new Audio();
     this._bindPlayer();
-    await Promise.all([this.loadStats(), this.loadBrands(), this.loadActivity(), this.loadCatalogStats()]);
+    await this.loadBrands(); // only brands needed to route
+
+    // ── Smart routing ────────────────────────────
+    if (!this.brands.length) {
+      this.page = 'brand-create';
+    } else {
+      const active = this.brands.find(b => b.sound_board_result || b.playlist_count > 0) || this.brands[0];
+      await this.openBrand(active.id);
+    }
+    this.loading = false;
+
+    // Load non-critical data in background after UI is shown
+    Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats()]);
+
     this.$watch('page', async val => {
       if(val==='soundboard' && this.curBrand && !this.curBrand.sound_board_result){
         await this.loadBrands();
         const b=this.brands.find(x=>x.id===this.curBrand.id);
         if(b)this.curBrand=b;
-        this.$nextTick(()=>this.initSbCharts());
+        setTimeout(()=>this.initSbCharts(),80);
       }
       if(val==='playlists' && this.curBrand && !this.curPl){
         try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
@@ -141,14 +163,17 @@ return {
   async openBrand(id){
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
-    try{const r=await this.apiFetch('/api/playlists/'+id);if(r&&r.ok)this.curPl=await r.json();else this.curPl=null}catch(e){this.curPl=null}
+    this.curPl=null;
     this.activeDp=0;
     const saved=localStorage.getItem('sbGenreOverrides_'+id);
     this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
-    this._origTargets={};   // reset so ranges re-freeze for new brand
+    this._origTargets={};
     this._origRanges={};
+    this.hasUnsavedChanges=false;
     this.page='soundboard';
-    this.$nextTick(()=>this.initSbCharts());
+    setTimeout(()=>this.initSbCharts(),80);
+    // Load playlist in background — don't block soundboard render
+    this.apiFetch('/api/playlists/'+id).then(r=>{if(r&&r.ok)r.json().then(d=>this.curPl=d)}).catch(()=>{});
   },
 
   _saveGenreOverrides(){
@@ -265,15 +290,15 @@ return {
     if(!id)return;
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
+    this.genMode='soundboard';
+    this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
+    this.showGen=true;
     try{
       const r=await this.apiFetch('/api/soundboard/'+id,{method:'POST'});
       if(!r||!r.ok)throw new Error('Failed');
       const {task_id}=await r.json();
-      this.genMode='soundboard';
-      this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
-      this.showGen=true;
       this._pollSb(task_id,id);
-    }catch(e){alert('Error: '+e.message)}
+    }catch(e){this.showGen=false;alert('Error: '+e.message)}
   },
 
   _pollSb(taskId,brandId){
@@ -292,10 +317,10 @@ return {
               const b=this.brands.find(x=>x.id===brandId);
               if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
               this.showGen=false;
-              this.$nextTick(()=>this.initSbCharts());
+              setTimeout(()=>this.initSbCharts(),80);
             } else {
               this.showGen=false;
-              this.$nextTick(()=>this.initSbCharts());
+              setTimeout(()=>this.initSbCharts(),80);
             }
           }
         }
@@ -303,7 +328,47 @@ return {
     },1000);
   },
 
+  async applyChanges(){
+    if(!this.curBrand?.id)return;
+    const saves=[];
+    if(this.curBrand?.sound_board_result){
+      const sb=this.curBrand.sound_board_result?.sound_board||{};
+      const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
+      const targets={};keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
+      // Sync all day_parts with global sound_board targets before saving
+      const dps=this.curBrand.sound_board_result?.day_parts;
+      if(dps?.length)dps.forEach(dp=>{keys.forEach(k=>{if(targets[k]!==undefined)dp[k]=targets[k]})});
+      if(Object.keys(targets).length)saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})}));
+      if(dps?.length){
+        const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
+        saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})}));
+      }
+    }
+    if(this.curBrand?.brand_profile){
+      const p=this.curBrand.brand_profile;
+      saves.push(this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})}));
+    }
+    // Clear debounce timers and mark as saved immediately — saves run in background
+    if(this._sbSaveTimer){clearTimeout(this._sbSaveTimer);this._sbSaveTimer=null;}
+    if(this._dpSaveTimer){clearTimeout(this._dpSaveTimer);this._dpSaveTimer=null;}
+    if(this._profileSaveTimer){clearTimeout(this._profileSaveTimer);this._profileSaveTimer=null;}
+    try{
+      await Promise.all(saves);
+      await this.loadBrands();
+      if(this.curBrand?.id){
+        const latest=this.brands.find(x=>x.id===this.curBrand.id);
+        if(latest)this.curBrand=latest;
+      }
+      this.hasUnsavedChanges=false;
+      setTimeout(()=>this.initSbCharts(),80);
+    }catch(e){
+      console.warn('Could not persist all changes:',e);
+      alert('Could not save all changes. Please try again.');
+    }
+  },
+
   async generatePlaylist(id){
+    if(this.hasUnsavedChanges){alert('Apply your changes first before generating a playlist.');return;}
     if(!id)return;
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
@@ -334,12 +399,17 @@ return {
             const finalStatus=this.genTask.status;
             clearInterval(this.genInterval);this.genInterval=null;
             if(finalStatus==='done'){
+              if((this.genTask.progress||0)<100){
+                this.genTask.progress=100;
+                this.genTask.log=[...(this.genTask.log||[]),'Finalizing playlists...'];
+                await new Promise(res=>setTimeout(res,450));
+              }
               // Fetch playlist first so tracks show immediately on navigation
               if(brandId){try{const pr=await this.apiFetch('/api/playlists/'+brandId);if(pr&&pr.ok)this.curPl=await pr.json()}catch(e){}}
               this.showGen=false;
               this.genTask=null;
               this.page='playlists';
-              this.$nextTick(()=>this.initSbCharts());
+              setTimeout(()=>this.initSbCharts(),80);
               // Refresh sidebar data in background (non-blocking)
               Promise.all([this.loadBrands(),this.loadStats(),this.loadActivity()]);
             }
@@ -360,8 +430,12 @@ return {
 
   // ── Sound board review helpers ─────────────
   sbAudioParams(){
+    void this.sbVersion; // reactive dependency so dragging timeline re-runs this
     const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
-    const dp0=this.curBrand?.sound_board_result?.day_parts?.[0]||this.curPl?.day_parts?.[0]||{};
+    const dp0=this.curBrand?.sound_board_result?.day_parts?.[this.activeDp]
+             ||this.curPl?.day_parts?.[this.activeDp]
+             ||this.curBrand?.sound_board_result?.day_parts?.[0]
+             ||this.curPl?.day_parts?.[0]||{};
     const e=sb.energy_target??dp0.energy_target??0.5;
     const v=sb.valence_target??dp0.valence_target??0.5;
     const t=sb.tempo_target??dp0.tempo_target??110;
@@ -416,12 +490,29 @@ return {
     if(sb){
       if(!sb.sound_board)sb.sound_board={};
       sb.sound_board[p.key+'_target']=val;
-      if(sb.day_parts)sb.day_parts.forEach(dp=>{dp[p.key+'_target']=val});
+      // Only update active day_part during drag — full sync happens on applyChanges
+      const activeDp=sb.day_parts?.[this.activeDp];
+      if(activeDp)activeDp[p.key+'_target']=val;
     }
     p.target=val;
     p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
     p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
+    this.hasUnsavedChanges=true;
+    this._refreshTimeline();
     this.saveTargets();
+  },
+
+  _refreshTimeline(){
+    // Debounce so rapid slider drags don't hammer Chart.js
+    if(this._tlRefreshTimer)clearTimeout(this._tlRefreshTimer);
+    this._tlRefreshTimer=setTimeout(()=>{
+      const chart=this.sbCharts.timeline;
+      const dps=this.curBrand?.sound_board_result?.day_parts||[];
+      if(!chart||!dps.length)return;
+      chart.data.datasets[0].data=dps.map(d=>d.energy_target);
+      chart.data.datasets[1].data=dps.map(d=>d.valence_target);
+      chart.update('none');
+    },60);
   },
 
   resetTarget(p){
@@ -477,10 +568,12 @@ return {
 
   sbAllGenres(){
     const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
-    const all=[...new Set([...(sb.primary_genres||[]),...(sb.secondary_genres||[])])];
-    (this.curBrand?.inputs?.include_genres||[]).forEach(g=>{if(!all.includes(g))all.push(g)});
-    this.sbGenreOverrides.include.forEach(g=>{if(!all.includes(g))all.push(g)});
-    this.sbGenreOverrides.exclude.forEach(g=>{if(!all.includes(g))all.push(g)});
+    const lower=this.allGenres.map(g=>g.toLowerCase());
+    const norm=g=>{const i=lower.indexOf((g||'').toLowerCase());return i>=0?this.allGenres[i]:g};
+    const all=[...new Set([...(sb.primary_genres||[]).map(norm),...(sb.secondary_genres||[]).map(norm)])];
+    (this.curBrand?.inputs?.include_genres||[]).forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
+    this.sbGenreOverrides.include.forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
+    this.sbGenreOverrides.exclude.forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
     return all;
   },
   sbIncluded(g){
@@ -491,6 +584,7 @@ return {
   },
   sbExcluded(g){return(this.curBrand?.inputs?.exclude_genres||[]).includes(g)||this.sbGenreOverrides.exclude.includes(g)},
   toggleSbGenre(g){
+    this.hasUnsavedChanges=true;
     const inc=this.sbGenreOverrides.include;const exc=this.sbGenreOverrides.exclude;
     const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
     const isOriginal=[...(sb.primary_genres||[]),...(sb.secondary_genres||[]),...(this.curBrand?.inputs?.include_genres||[])].includes(g);
@@ -517,7 +611,8 @@ return {
     if(this.sbCharts.timeline){this.sbCharts.timeline.destroy();this.sbCharts.timeline=null}
     const rc=document.getElementById('sb-radar');
     if(rc){
-      this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:true,layout:{padding:18},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:8}}}},plugins:{legend:{display:false},dragData:false}}});
+      rc.width=220;rc.height=220;
+      this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:false,layout:{padding:16},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:10}}}},plugins:{legend:{display:false},dragData:false}}});
     }
     const tc=document.getElementById('sb-timeline');
     if(tc&&dps.length){
@@ -589,6 +684,8 @@ return {
                 const clamped=round2(Math.min(1,Math.max(0,value)));
                 if(datasetIndex===0) dpsRef[index].energy_target=clamped;
                 else dpsRef[index].valence_target=clamped;
+                this.hasUnsavedChanges=true;
+                this.sbVersion++; // triggers sbAudioParams() to re-run for active dp
                 this.saveDayPartData();
               }
             }
@@ -657,9 +754,9 @@ return {
                 // Update in-memory profile
                 if(this.curBrand?.brand_profile) this.curBrand.brand_profile[key]=clamped;
                 else if(this.curBrand) this.curBrand.brand_profile={[key]:clamped};
-                // Also update small radar if visible
-                const smallChart=this.sbCharts.radar;
-                if(smallChart){smallChart.data.datasets[0].data[index]=clamped;smallChart.update();}
+                // Sync small radar with full profile data (robust — no stale index issues)
+                this._syncSmallRadar();
+                this.hasUnsavedChanges=true;
                 this.saveProfileData();
               }
             }
@@ -672,13 +769,22 @@ return {
     }
   },
 
+  _syncSmallRadar(){
+    const smallChart=this.sbCharts.radar;
+    if(!smallChart)return;
+    const p=this.curBrand?.brand_profile||this.curPl?.brand_profile||{};
+    const DIMS=['sincerity','excitement','competence','sophistication','ruggedness'];
+    smallChart.data.datasets[0].data=DIMS.map(d=>p[d]||0);
+    smallChart.update('none');
+  },
+
   saveProfileData(){
     if(!this.curBrand?.id||!this.curBrand?.brand_profile) return;
     if(this._profileSaveTimer) clearTimeout(this._profileSaveTimer);
     this._profileSaveTimer=setTimeout(async()=>{
       const p=this.curBrand.brand_profile;
       try{
-        await this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{
+        const r=await this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{
           method:'PUT',
           body:JSON.stringify({
             sincerity:p.sincerity,
@@ -688,6 +794,16 @@ return {
             ruggedness:p.ruggedness
           })
         });
+        if(r&&r.ok){
+          const data=await r.json();
+          if(data?.brand_profile)this.curBrand.brand_profile=data.brand_profile;
+          if(data?.sound_board_result)this.curBrand.sound_board_result=data.sound_board_result;
+          this._syncSmallRadar();
+          setTimeout(()=>this.initSbCharts(),80);
+          await this.loadBrands();
+          const latest=this.brands.find(x=>x.id===this.curBrand.id);
+          if(latest)this.curBrand=latest;
+        }
       }catch(e){console.warn('Could not save brand profile:',e)}
     },600);
   },

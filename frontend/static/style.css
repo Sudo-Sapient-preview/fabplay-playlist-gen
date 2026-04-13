@@ -11,15 +11,24 @@
   --txt:      #1A1A1A;
   --muted:    #6B6B6B;
   --faint:    #A8A8A8;
+  --font-body: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-heading: "Fraunces", "Times New Roman", serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased}
+body{font-family:var(--font-body);background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-heading)}
+.page-sub,.stat-l,.sc-desc{font-family:var(--font-body)}
 [x-cloak]{display:none!important}
 
-::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#D0CEC9;border-radius:99px}
+::-webkit-scrollbar-thumb{background:#C4C2BC;border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:#AEACAA}
+
+/* generation spinner */
+.gen-spinner{width:48px;height:48px;border:4px solid #F3F3F3;border-top:4px solid var(--red);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── Sidebar ── */
 .sb{width:240px;flex-shrink:0;background:var(--sb-bg);display:flex;flex-direction:column;height:100%}

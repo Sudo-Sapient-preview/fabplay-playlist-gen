@@ -55,15 +55,18 @@ async def get_current_user(
 ) -> dict:
     """Validate a Supabase JWT by calling /auth/v1/user. Returns the user dict."""
     token = creds.credentials
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{SUPABASE_URL}/auth/v1/user",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "apikey": SUPABASE_SERVICE_KEY,
-            },
-            timeout=5.0,
-        )
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "apikey": SUPABASE_SERVICE_KEY,
+                },
+                timeout=10.0,
+            )
+    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as e:
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return resp.json()
@@ -79,7 +82,7 @@ async def get_current_role(user: dict = Depends(get_current_user)) -> str:
         .maybe_single()
         .execute()
     )
-    return result.data["role"] if result.data else "viewer"
+    return result.data["role"] if (result and result.data) else "viewer"
 
 
 async def require_superadmin(role: str = Depends(get_current_role)):
@@ -147,6 +150,10 @@ def _resolve_track_src(track: dict) -> str:
     fname = track.get("filename") or ""
     if fname and fname in idx:
         return _songs_url(idx[fname])
+    # Fallback for VM streaming mode when no local songs index/manifest exists.
+    # Assumes files are directly addressable by filename under SONGS_BASE_URL/songs/.
+    if fname and SONGS_BASE_URL and not idx:
+        return _songs_url(fname)
     if fname:
         fn = _norm(fname)
         for name, path in idx.items():
@@ -184,6 +191,7 @@ def _load(path: Path, default):
 
 
 def _save(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -371,6 +379,119 @@ def _pipeline_inputs(brand: dict) -> dict:
         "asset_analysis":       brand.get("asset_analysis", ""),
         "has_brand_guidelines": brand.get("has_brand_guidelines", False),
     }
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _derive_sound_targets_from_profile(profile: dict, segment: str) -> dict:
+    sincerity = float(profile.get("sincerity", 0.5))
+    excitement = float(profile.get("excitement", 0.5))
+    competence = float(profile.get("competence", 0.5))
+    sophistication = float(profile.get("sophistication", 0.5))
+    ruggedness = float(profile.get("ruggedness", 0.5))
+
+    targets = {
+        "energy_target": _clamp(
+            0.35 + 0.35 * excitement - 0.15 * sophistication - 0.10 * sincerity + 0.10 * ruggedness, 0.0, 1.0
+        ),
+        "valence_target": _clamp(
+            0.40 + 0.30 * sincerity + 0.25 * excitement - 0.10 * ruggedness, 0.0, 1.0
+        ),
+        "tempo_target": int(round(_clamp(
+            90 + 45 * excitement + 10 * ruggedness - 15 * sophistication, 60, 200
+        ))),
+        "danceability_target": _clamp(
+            0.35 + 0.40 * excitement - 0.10 * sincerity, 0.0, 1.0
+        ),
+        "acousticness_target": _clamp(
+            0.25 + 0.45 * sincerity + 0.20 * sophistication - 0.20 * excitement, 0.0, 1.0
+        ),
+        "instrumentalness_target": _clamp(
+            0.20 + 0.45 * sophistication + 0.15 * competence - 0.20 * ruggedness, 0.0, 1.0
+        ),
+        "loudness_target": _clamp(
+            0.45 + 0.30 * excitement + 0.25 * ruggedness - 0.20 * sophistication, 0.0, 1.0
+        ),
+        "speechiness_target": _clamp(
+            0.20 + 0.20 * ruggedness - 0.15 * sophistication, 0.0, 1.0
+        ),
+    }
+
+    # Keep customer-segment baseline behavior consistent with sound_board.py.
+    seg_adj = {
+        "value":     {"energy": +0.10, "tempo": +5,  "acousticness": -0.05},
+        "mid_range": {"energy":  0.00, "tempo":  0,  "acousticness":  0.00},
+        "premium":   {"energy": -0.05, "tempo": -5,  "acousticness": +0.05},
+        "luxury":    {"energy": -0.10, "tempo": -10, "acousticness": +0.10},
+    }.get(segment, {"energy": 0.0, "tempo": 0, "acousticness": 0.0})
+
+    targets["energy_target"] = _clamp(targets["energy_target"] + seg_adj["energy"], 0.0, 1.0)
+    targets["tempo_target"] = int(round(_clamp(targets["tempo_target"] + seg_adj["tempo"], 60, 200)))
+    targets["acousticness_target"] = _clamp(
+        targets["acousticness_target"] + seg_adj["acousticness"], 0.0, 1.0
+    )
+    return targets
+
+
+def _apply_profile_targets_to_soundboard(brand: dict) -> bool:
+    sb_result = brand.get("sound_board_result")
+    bp = brand.get("brand_profile")
+    if not sb_result or not isinstance(sb_result, dict) or not bp:
+        return False
+
+    sb = sb_result.setdefault("sound_board", {})
+    segment = brand.get("customer_segment", "mid_range")
+    new_targets = _derive_sound_targets_from_profile(bp, segment)
+
+    old_targets = {
+        k: sb.get(k)
+        for k in new_targets.keys()
+    }
+    for key, val in new_targets.items():
+        sb[key] = val
+
+    # Move each day-part target by the same delta so profile edits ripple through
+    # while preserving each day-part's relative contour.
+    for dp in sb_result.get("day_parts", []):
+        for key, new_val in new_targets.items():
+            old_global = old_targets.get(key)
+            cur = dp.get(key)
+            if old_global is None or cur is None:
+                dp[key] = new_val
+            else:
+                delta = float(cur) - float(old_global)
+                if key == "tempo_target":
+                    dp[key] = int(round(_clamp(new_val + delta, 60, 200)))
+                else:
+                    dp[key] = round(_clamp(float(new_val) + delta, 0.0, 1.0), 3)
+
+        for base in ("energy", "valence", "tempo"):
+            t_key = f"{base}_target"
+            min_key = f"{base}_min"
+            max_key = f"{base}_max"
+            if min_key not in dp or max_key not in dp or t_key not in dp:
+                continue
+            t = float(dp[t_key])
+            old_min = float(dp[min_key])
+            old_max = float(dp[max_key])
+            if old_min > old_max:
+                old_min, old_max = old_max, old_min
+            half = (old_max - old_min) / 2.0
+            if base == "tempo":
+                dp[min_key] = int(round(_clamp(t - half, 60, 200)))
+                dp[max_key] = int(round(_clamp(t + half, 60, 200)))
+                if dp[min_key] > dp[max_key]:
+                    dp[min_key], dp[max_key] = dp[max_key], dp[min_key]
+                dp[t_key] = int(round(_clamp(float(dp[t_key]), dp[min_key], dp[max_key])))
+            else:
+                dp[min_key] = round(_clamp(t - half, 0.0, 1.0), 3)
+                dp[max_key] = round(_clamp(t + half, 0.0, 1.0), 3)
+                if dp[min_key] > dp[max_key]:
+                    dp[min_key], dp[max_key] = dp[max_key], dp[min_key]
+                dp[t_key] = round(_clamp(float(dp[t_key]), dp[min_key], dp[max_key]), 3)
+    return True
 
 
 # ─── Background: Sound Board ──────────────────────────────────────────────────
@@ -630,17 +751,19 @@ def activity():
 # ─── Routes: Brands ───────────────────────────────────────────────────────────
 
 @protected_router.get("/api/brands")
-def list_brands():
-    return list(get_brands().values())
+def list_brands(user: dict = Depends(get_current_user)):
+    uid = user["id"]
+    return [b for b in get_brands().values() if b.get("user_id") == uid]
 
 
 @protected_router.post("/api/brands")
-async def create_brand(req: Request):
+async def create_brand(req: Request, user: dict = Depends(get_current_user)):
     data     = await req.json()
     brand_id = str(uuid.uuid4())
     now      = datetime.now(timezone.utc).isoformat()
     brand = {
         "id":                   brand_id,
+        "user_id":              user["id"],
         "brand_name":           data.get("brand_name", ""),
         "category":             data.get("category", ""),
         "website_url":          data.get("website_url", ""),
@@ -673,10 +796,12 @@ async def create_brand(req: Request):
 
 
 @protected_router.delete("/api/brands/{brand_id}")
-def delete_brand(brand_id: str):
+def delete_brand(brand_id: str, user: dict = Depends(get_current_user)):
     brands = get_brands()
     if brand_id not in brands:
         raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
     name = brands.pop(brand_id)["brand_name"]
     save_brands(brands)
     playlists = get_playlists()
@@ -1033,11 +1158,20 @@ async def update_brand_profile(brand_id: str, req: Request):
     updates = {k: float(v) for k, v in data.items() if k in PROFILE_KEYS and v is not None}
     if not updates:
         raise HTTPException(400, "No valid profile keys provided")
-    bp = brands[brand_id].setdefault("brand_profile", {})
+    bp = brands[brand_id].get("brand_profile") or {}
     bp.update(updates)
+    brands[brand_id]["brand_profile"] = bp
+    soundboard_updated = _apply_profile_targets_to_soundboard(brands[brand_id])
     brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()
     save_brands(brands)
-    return {"ok": True, "updated": updates}
+    return {
+        "ok": True,
+        "updated": updates,
+        "soundboard_updated": soundboard_updated,
+        "brand_profile": brands[brand_id].get("brand_profile"),
+        "sound_board_result": brands[brand_id].get("sound_board_result"),
+        "last_updated": brands[brand_id].get("last_updated"),
+    }
 
 
 @protected_router.get("/api/playlists/{brand_id}")
