@@ -117,7 +117,8 @@
 
   input[type="email"],
   input[type="password"],
-  input[type="text"] {
+  input[type="text"],
+  input[type="tel"] {
     width: 100%;
     padding: 10px 13px;
     font-size: 14px;
@@ -205,6 +206,7 @@
   password: '',
   confirmPassword: '',
   fullName: '',
+  phone: '',
   loading: false,
   error: '',
   success: '',
@@ -265,7 +267,11 @@
 
   async signup() {
     if (!this.email || !this.password) {
-      this.error = 'Please fill in all fields.';
+      this.error = 'Please fill in all required fields.';
+      return;
+    }
+    if (!this.phone.trim()) {
+      this.error = 'Phone number is required.';
       return;
     }
     if (this.password.length < 6) {
@@ -287,7 +293,7 @@
         body: JSON.stringify({
           email: this.email,
           password: this.password,
-          data: { full_name: this.fullName },
+          data: { full_name: this.fullName, phone: this.phone.trim() },
           redirect_to: window.location.origin + '/auth/callback'
         })
       });
@@ -351,12 +357,16 @@
     <!-- ── Sign Up Form ── -->
     <form x-show="mode==='signup'" @submit.prevent="signup()">
       <div class="field">
-        <label for="su-name">Full Name <span style="color:var(--faint);font-weight:400">(optional)</span></label>
-        <input id="su-name" type="text" x-model="fullName" placeholder="Jane Smith" autocomplete="name" :disabled="loading">
+        <label for="su-name">Full Name</label>
+        <input id="su-name" type="text" x-model="fullName" placeholder="Raj Sharma" autocomplete="name" :disabled="loading">
       </div>
       <div class="field">
-        <label for="su-email">Email</label>
-        <input id="su-email" type="email" x-model="email" placeholder="you@example.com" autocomplete="email" :disabled="loading">
+        <label for="su-email">Email <span style="color:var(--accent)">*</span></label>
+        <input id="su-email" type="email" x-model="email" placeholder="you@example.com" autocomplete="email" :disabled="loading" required>
+      </div>
+      <div class="field">
+        <label for="su-phone">Phone Number <span style="color:var(--accent)">*</span></label>
+        <input id="su-phone" type="tel" x-model="phone" placeholder="+91 XXXXX XXXXX" autocomplete="tel" :disabled="loading" required>
       </div>
       <div class="field">
         <label for="su-password">Password</label>

@@ -37,6 +37,11 @@ return {
   sbGenreOverrides: {include:[], exclude:[]},
   sbShowAddGenre: false,
   hasUnsavedChanges: false,
+  sbAcousticDirty: false,
+  sbGenreDirty: false,
+  sbTimelineDirty: false,
+  sbProfileDirty: false,
+  sbNeedsGeneration: false,
   profileDirty: false,
   sbVersion: 0,
   _sbSaveTimer: null,
@@ -61,6 +66,7 @@ return {
   npTrackKey: '',
   npQueue: [],
   npQueueIdx: 0,
+  isScrubbing: false,
 
   // Approval state: keyed by "dpIdx-trackIdx"
   approvedTracks: {},
@@ -180,6 +186,10 @@ return {
     this._origTargets={};
     this._origRanges={};
     this.hasUnsavedChanges=false;
+    this.sbAcousticDirty=false;
+    this.sbGenreDirty=false;
+    this.sbTimelineDirty=false;
+    this.sbProfileDirty=false;
     this.profileDirty=false;
     this.page='soundboard';
     this.scheduleSbChartsInit();
@@ -365,6 +375,7 @@ return {
     let soundboardReq=null;
     let daypartsReq=null;
     let profileReq=null;
+    let genreReq=null;
     if(this.curBrand?.sound_board_result){
       const sb=this.curBrand.sound_board_result?.sound_board||{};
       const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
@@ -380,6 +391,15 @@ return {
       const p=this.curBrand.brand_profile;
       profileReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})});
     }
+    // Merge soundboard genre overrides into the brand's permanent include/exclude lists
+    if(this.sbGenreOverrides.include.length||this.sbGenreOverrides.exclude.length){
+      const baseInc=this.curBrand?.include_genres||[];
+      const baseExc=this.curBrand?.exclude_genres||[];
+      // Overrides take precedence: genres in override.include are removed from exclude list and vice versa
+      const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
+      const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
+      genreReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc})});
+    }
     // Clear debounce timers and mark as saved immediately — saves run in background
     if(this._sbSaveTimer){clearTimeout(this._sbSaveTimer);this._sbSaveTimer=null;}
     if(this._dpSaveTimer){clearTimeout(this._dpSaveTimer);this._dpSaveTimer=null;}
@@ -389,11 +409,14 @@ return {
       if(profileReq) await profileReq();
       if(soundboardReq) await soundboardReq();
       if(daypartsReq) await daypartsReq();
+      if(genreReq) await genreReq();
       await this.loadBrands();
       if(this.curBrand?.id){
         const latest=this.brands.find(x=>x.id===this.curBrand.id);
         if(latest)this.curBrand=latest;
       }
+      // Overrides are now merged into the brand — clear the transient state
+      if(genreReq){this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();}
       this.hasUnsavedChanges=false;
       this.profileDirty=false;
       this.scheduleSbChartsInit();
@@ -404,10 +427,11 @@ return {
   },
 
   async generatePlaylist(id){
-    if(this.hasUnsavedChanges){alert('Apply your changes first before generating a playlist.');return;}
+    if(this.sbAcousticDirty||this.sbGenreDirty||this.sbTimelineDirty||this.sbProfileDirty){alert('Save your changes first before generating a playlist.');return;}
     if(!id)return;
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
+    this.sbNeedsGeneration=false;
     // Show modal immediately so user gets instant feedback
     this.genMode='playlist';
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
@@ -534,7 +558,7 @@ return {
       p.target=val;
       p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
       p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
-      this.hasUnsavedChanges=true;
+      this.sbAcousticDirty=true;
       this._sliderRaf=null;
     };
     if(this._sliderRaf){
@@ -561,6 +585,79 @@ return {
     const orig=this._origTargets[p.key];
     if(orig===undefined)return;
     this.updateTarget(p, orig);
+  },
+
+  resetAllAcousticTargets(){
+    const keys=['energy','valence','tempo','danceability','acousticness','instrumentalness','loudness','speechiness'];
+    const sb=this.curBrand?.sound_board_result;
+    if(!sb)return;
+    keys.forEach(k=>{
+      const orig=this._origTargets[k];
+      if(orig===undefined)return;
+      if(!sb.sound_board)sb.sound_board={};
+      sb.sound_board[k+'_target']=orig;
+      sb.day_parts?.forEach(dp=>{dp[k+'_target']=orig});
+    });
+    this.sbAcousticDirty=false;
+    this.sbVersion++;
+  },
+
+  async saveAcousticChanges(){
+    if(!this.curBrand?.id||!this.curBrand?.sound_board_result)return;
+    const sb=this.curBrand.sound_board_result.sound_board||{};
+    const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
+    const targets={};keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
+    const dps=this.curBrand.sound_board_result.day_parts;
+    try{
+      if(Object.keys(targets).length)
+        await this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})});
+      if(dps?.length){
+        const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
+        await this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})});
+      }
+      this.sbAcousticDirty=false;
+      this.sbNeedsGeneration=true;
+    }catch(e){alert('Could not save acoustic changes. Please try again.');}
+  },
+
+  async saveGenreChanges(){
+    if(!this.curBrand?.id)return;
+    const baseInc=this.curBrand?.include_genres||[];
+    const baseExc=this.curBrand?.exclude_genres||[];
+    const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
+    const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
+    try{
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc})});
+      await this.loadBrands();
+      const latest=this.brands.find(x=>x.id===this.curBrand.id);
+      if(latest)this.curBrand=latest;
+      this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();
+      this.sbGenreDirty=false;
+      this.sbNeedsGeneration=true;
+    }catch(e){alert('Could not save genre changes. Please try again.');}
+  },
+
+  async saveTimelineChanges(){
+    if(!this.curBrand?.id)return;
+    const dps=this.curBrand?.sound_board_result?.day_parts;
+    if(!dps?.length){this.sbTimelineDirty=false;return;}
+    try{
+      const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})});
+      this.sbTimelineDirty=false;
+      this.sbNeedsGeneration=true;
+    }catch(e){alert('Could not save timeline changes. Please try again.');}
+  },
+
+  async saveProfileChanges(){
+    if(!this.curBrand?.id||!this.curBrand?.brand_profile)return;
+    const p=this.curBrand.brand_profile;
+    try{
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})});
+      this.sbProfileDirty=false;
+      this.profileDirty=false;
+      this.sbNeedsGeneration=true;
+    }catch(e){alert('Could not save profile changes. Please try again.');}
   },
 
   saveTargets(){
@@ -607,37 +704,33 @@ return {
     },600);
   },
 
-  sbAllGenres(){
-    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
-    const lower=this.allGenres.map(g=>g.toLowerCase());
-    const norm=g=>{const i=lower.indexOf((g||'').toLowerCase());return i>=0?this.allGenres[i]:g};
-    const all=[...new Set([...(sb.primary_genres||[]).map(norm),...(sb.secondary_genres||[]).map(norm)])];
-    (this.curBrand?.inputs?.include_genres||[]).forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
-    this.sbGenreOverrides.include.forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
-    this.sbGenreOverrides.exclude.forEach(g=>{const n=norm(g);if(!all.includes(n))all.push(n)});
-    return all;
-  },
+  sbAllGenres(){return this.allGenres;},
   sbIncluded(g){
     if(this.sbGenreOverrides.exclude.includes(g))return false;
     if(this.sbGenreOverrides.include.includes(g))return true;
-    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
-    return[...(sb.primary_genres||[]),...(sb.secondary_genres||[]),...(this.curBrand?.inputs?.include_genres||[])].includes(g);
+    const lower=this.allGenres.map(x=>x.toLowerCase());
+    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?this.allGenres[i]:x};
+    return(this.curBrand?.include_genres||[]).map(norm).includes(g);
   },
-  sbExcluded(g){return(this.curBrand?.inputs?.exclude_genres||[]).includes(g)||this.sbGenreOverrides.exclude.includes(g)},
+  sbExcluded(g){
+    if(this.sbGenreOverrides.include.includes(g))return false;
+    const lower=this.allGenres.map(x=>x.toLowerCase());
+    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?this.allGenres[i]:x};
+    return(this.curBrand?.exclude_genres||[]).map(norm).includes(g)||this.sbGenreOverrides.exclude.includes(g);
+  },
   toggleSbGenre(g){
-    this.hasUnsavedChanges=true;
+    this.sbGenreDirty=true;
     const inc=this.sbGenreOverrides.include;const exc=this.sbGenreOverrides.exclude;
-    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
-    const isOriginal=[...(sb.primary_genres||[]),...(sb.secondary_genres||[]),...(this.curBrand?.inputs?.include_genres||[])].includes(g);
-    // excluded state: original → back to included; manually added → remove entirely
-    if(exc.includes(g)){
+    // cycle: excluded → neutral, included → excluded, neutral → included
+    if(this.sbExcluded(g)){
       this.sbGenreOverrides.exclude=exc.filter(x=>x!==g);
-      if(!isOriginal)this.sbGenreOverrides.include=inc.filter(x=>x!==g);
       this._saveGenreOverrides();return;
     }
-    // included → move to excluded (stays visible as crossed out)
-    if(inc.includes(g)){this.sbGenreOverrides.include=inc.filter(x=>x!==g);this.sbGenreOverrides.exclude=[...exc,g];this._saveGenreOverrides();return}
-    if(this.sbIncluded(g)){this.sbGenreOverrides.exclude=[...exc,g];this._saveGenreOverrides();return}
+    if(this.sbIncluded(g)){
+      this.sbGenreOverrides.include=inc.filter(x=>x!==g);
+      this.sbGenreOverrides.exclude=[...exc,g];
+      this._saveGenreOverrides();return;
+    }
     this.sbGenreOverrides.include=[...inc,g];this._saveGenreOverrides();
   },
 
@@ -878,7 +971,7 @@ return {
                 const clamped=round2(Math.min(1,Math.max(0,value)));
                 if(datasetIndex===0) dpsRef[index].energy_target=clamped;
                 else dpsRef[index].valence_target=clamped;
-                this.hasUnsavedChanges=true;
+                this.sbTimelineDirty=true;
                 this.sbVersion++; // triggers sbAudioParams() to re-run for active dp
               }
             }
@@ -954,7 +1047,7 @@ return {
                 else if(this.curBrand) this.curBrand.brand_profile={[key]:clamped};
                 // Sync small radar with full profile data (robust — no stale index issues)
                 this._syncSmallRadar();
-                this.hasUnsavedChanges=true;
+                this.sbProfileDirty=true;
                 this.profileDirty=true;
               }
             }
@@ -1015,7 +1108,7 @@ return {
   _bindPlayer(){
     const p=this.player;
     p.volume=0.8;
-    p.addEventListener('timeupdate',()=>{this.npCurrent=p.currentTime;this.npDuration=p.duration||0;if(this.$refs.scrub)this.$refs.scrub.value=p.currentTime});
+    p.addEventListener('timeupdate',()=>{if(!this.isScrubbing){this.npCurrent=p.currentTime;this.npDuration=p.duration||0;if(this.$refs.scrub)this.$refs.scrub.value=p.currentTime;}});
     p.addEventListener('play',()=>{this.npPlaying=true});
     p.addEventListener('pause',()=>{this.npPlaying=false});
     p.addEventListener('ended',()=>{this.nextTrack()});

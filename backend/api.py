@@ -334,6 +334,7 @@ def embed_client() -> tuple[AzureOpenAI, str]:
 
 def _fmt_track(t: dict) -> dict:
     return {
+        "song_id":          t.get("song_id", t.get("id", "")),
         "title":            t.get("title", ""),
         "artist":           t.get("artist", ""),
         "genre":            t.get("genre", ""),
@@ -729,6 +730,31 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         playlists = get_playlists()
         playlists[brand_id] = playlist_result
         save_playlists(playlists)
+
+        # ── Sync generated songs to Supabase user_playlist_songs ──────────────
+        user_id = brand.get("user_id")
+        if user_id:
+            unique_songs: dict[str, str] = {}
+            for dp_result in assembled:
+                for track in dp_result.get("tracks", []):
+                    sid = track.get("song_id")
+                    if sid and sid not in unique_songs:
+                        unique_songs[sid] = track.get("title", "")
+            if unique_songs:
+                try:
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    get_supabase().table("user_playlist_songs") \
+                        .delete().eq("user_id", user_id).eq("brand_id", brand_id).execute()
+                    rows = [
+                        {"user_id": user_id, "brand_id": brand_id,
+                         "song_id": sid, "song_name": name, "generated_at": now_iso}
+                        for sid, name in unique_songs.items()
+                    ]
+                    get_supabase().table("user_playlist_songs").insert(rows).execute()
+                    logger.info("Synced %d songs to user_playlist_songs (user=%s brand=%s)",
+                                len(rows), user_id, brand_id)
+                except Exception as e:
+                    logger.warning("Could not sync playlist songs to Supabase: %s", e)
 
         brands = get_brands()
         brands[brand_id]["playlist_count"] = brands[brand_id].get("playlist_count", 0) + 1
