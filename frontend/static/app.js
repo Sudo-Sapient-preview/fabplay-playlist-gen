@@ -143,6 +143,12 @@ return {
         try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
       }
     });
+    this.$watch('curBrand', () => {
+      if(this.page==='soundboard') this.scheduleSbChartsInit();
+    });
+    this.$watch('curPl', () => {
+      if(this.page==='soundboard') this.scheduleSbChartsInit();
+    });
   },
 
   async loadStats(){ try{ const r=await this.apiFetch('/api/stats'); if(r&&r.ok)this.stats=await r.json() }catch(e){} },
@@ -184,8 +190,10 @@ return {
     }).catch(()=>{});
   },
 
-  scheduleSbChartsInit(retries=8){
+  scheduleSbChartsInit(retries=60){
     this.$nextTick(()=>{
+      // Only keep retrying while the Soundboard view is active.
+      if(this.page!=='soundboard') return;
       const rc=document.getElementById('sb-radar');
       const tc=document.getElementById('sb-timeline');
       if(rc||tc){
@@ -193,7 +201,7 @@ return {
         return;
       }
       if(retries>0){
-        setTimeout(()=>this.scheduleSbChartsInit(retries-1),100);
+        setTimeout(()=>this.scheduleSbChartsInit(retries-1),150);
       }
     });
   },
