@@ -762,7 +762,47 @@ return {
         this._drawRadarFallback(rc, profile, false);
       } else {
         try{
-          this.sbCharts.radar=new Chart(rc,{type:'radar',data:{labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],datasets:[{data:[profile.sincerity||0,profile.excitement||0,profile.competence||0,profile.sophistication||0,profile.ruggedness||0],backgroundColor:'rgba(192,57,43,0.2)',borderColor:'rgba(192,57,43,0.8)',pointBackgroundColor:'rgba(192,57,43,1)',borderWidth:2}]},options:{responsive:false,maintainAspectRatio:false,layout:{padding:16},scales:{r:{min:0,max:1,ticks:{display:false},pointLabels:{font:{size:10}}}},plugins:{legend:{display:false},dragData:false}}});
+          this.sbCharts.radar=new Chart(rc,{
+            type:'radar',
+            data:{
+              labels:['Sincerity','Excitement','Competence','Sophistication','Ruggedness'],
+              datasets:[{
+                data:[
+                  profile.sincerity||0,
+                  profile.excitement||0,
+                  profile.competence||0,
+                  profile.sophistication||0,
+                  profile.ruggedness||0
+                ],
+                backgroundColor:'rgba(192,57,43,0.22)',
+                borderColor:'rgba(192,57,43,0.92)',
+                borderWidth:2.2,
+                pointBackgroundColor:'rgba(192,57,43,1)',
+                pointBorderColor:'#fff',
+                pointBorderWidth:1.5,
+                pointRadius:3
+              }]
+            },
+            options:{
+              responsive:false,
+              maintainAspectRatio:false,
+              animation:{duration:0},
+              layout:{padding:16},
+              scales:{
+                r:{
+                  min:0,max:1,
+                  ticks:{display:false},
+                  grid:{color:'rgba(148,163,184,0.32)'},
+                  angleLines:{color:'rgba(148,163,184,0.32)'},
+                  pointLabels:{
+                    color:'#6B7280',
+                    font:{size:11,family:'Space Grotesk, sans-serif',weight:'600'}
+                  }
+                }
+              },
+              plugins:{legend:{display:false},dragData:false}
+            }
+          });
         }catch(e){
           this._drawRadarFallback(rc, profile, false);
         }
