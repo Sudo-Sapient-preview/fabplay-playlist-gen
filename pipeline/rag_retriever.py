@@ -9,9 +9,32 @@ For each day-part:
 
 import logging
 
-from backend.db import fetch_all_songs, fetch_songs_by_artist, fetch_songs_by_genre
+from backend.db import fetch_all_songs, fetch_songs_filtered, fetch_songs_by_artist, fetch_songs_by_genre
+from pipeline.mmr_scorer import compute_relevance
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_genre(g: str) -> str:
+    """Normalise a genre string for comparison: lowercase, spaces/slashes → underscores."""
+    return (g or "").lower().replace(' ', '_').replace('/', '_').replace('-', '_')
+
+
+def _has_playable_audio(track: dict) -> bool:
+    """Return True when a track has a usable URL and non-trivial duration."""
+    url = str(track.get("url") or track.get("src") or "").strip()
+    if not url:
+        return False
+    # Accept absolute URLs, root-relative paths, and filename/path values.
+    if not (
+        url.startswith("http://")
+        or url.startswith("https://")
+        or url.startswith("/")
+        or "/" in url
+        or "." in url
+    ):
+        return False
+    return float(track.get("duration_seconds") or 0) > 10
 
 # ─── Hard-filter helpers ──────────────────────────────────────────────────────
 
@@ -57,14 +80,14 @@ def _apply_hard_filters(
     filtered = []
     for track in candidates:
         artist = (track.get("artist") or "").lower()
-        genre  = (track.get("genre")  or "").lower()
+        genre  = _norm_genre(track.get("genre"))
         tempo  = float(track.get("tempo_bpm", 120))
         energy = float(track.get("energy",    0.5))
         valence = float(track.get("valence",  0.5))
 
         if any(ea.lower() in artist for ea in exclude_artists if ea):
             continue
-        if any(eg.lower() in genre for eg in exclude_genres if eg):
+        if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
         if not (tempo_min <= tempo <= tempo_max):
             continue
@@ -95,10 +118,10 @@ def _apply_exclusion_filters_only(
     filtered = []
     for track in candidates:
         artist = (track.get("artist") or "").lower()
-        genre  = (track.get("genre")  or "").lower()
+        genre  = _norm_genre(track.get("genre"))
         if any(ea.lower() in artist for ea in exclude_artists if ea):
             continue
-        if any(eg.lower() in genre for eg in exclude_genres if eg):
+        if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
         if filter_explicit and _is_explicit_proxy(track):
             continue
@@ -121,16 +144,25 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 # ─── Main retriever ───────────────────────────────────────────────────────────
 
 MIN_CANDIDATES = 5
+# Large enough that cross-day-part dedup still leaves plenty of fresh candidates
+# across a 5-slot day. Each slot may use 55-75 tracks; 5 × 75 = 375, so 600 gives
+# comfortable headroom before the best-by-relevance cap kicks in.
+MAX_CANDIDATES = 600
 
 
 def retrieve_candidates(
     brand_profile:   dict,
     day_part_params: dict,
     inputs:          dict,
+    used_song_ids:   set | None = None,
 ) -> tuple[list[dict], dict]:
     """
-    BFS-based retrieval for one day-part.
-    Fetches the full song catalog and applies hard filters.
+    Retrieval for one day-part.
+    Fetches the full song catalog and applies hard filters in Python.
+
+    used_song_ids: IDs already selected in earlier day-parts.  Fresh tracks are
+    ranked ahead of already-used ones so the MAX_CANDIDATES cap preferentially
+    returns songs the playlist hasn't seen yet.
 
     Returns:
         (filtered_candidates, stats_dict)
@@ -158,14 +190,27 @@ def retrieve_candidates(
     # 4. Drop audio-feature bounds entirely if still too few
     if len(filtered) < MIN_CANDIDATES:
         logger.warning(
-            "Still only %d candidates for '%s'. Dropping audio-feature bounds, "
-            "keeping exclusions only.",
+            "Still only %d candidates for '%s'. Dropping audio-feature bounds, keeping exclusions only.",
             len(filtered), dp_name,
         )
         filtered = _apply_exclusion_filters_only(all_songs, inputs)
 
+    # Drop songs with no URL or zero duration — they'd be unplayable or stall duration targets.
+    filtered = [s for s in filtered if _has_playable_audio(s)]
+
     if not filtered:
         return [], {"filtered_count": 0, "skipped": True}
+
+    # Cap pool size before MMR — sort by relevance but put fresh tracks first so
+    # the MAX_CANDIDATES window is dominated by songs not yet used in earlier parts.
+    if len(filtered) > MAX_CANDIDATES:
+        filtered.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
+        if used_song_ids:
+            fresh = [t for t in filtered if t.get("song_id") not in used_song_ids]
+            stale = [t for t in filtered if t.get("song_id") in used_song_ids]
+            filtered = (fresh + stale)[:MAX_CANDIDATES]
+        else:
+            filtered = filtered[:MAX_CANDIDATES]
 
     return filtered, {"filtered_count": len(filtered), "skipped": False}
 
@@ -196,6 +241,9 @@ def fetch_must_include_tracks(
             if artist_name.lower() in (t.get("artist") or "").lower()
         ]
 
+        # Keep only playable tracks from the candidate pool.
+        matches = [t for t in matches if _has_playable_audio(t)]
+
         if not matches:
             # SQL fallback
             sql_tracks = fetch_songs_by_artist(artist_name)
@@ -205,7 +253,10 @@ def fetch_must_include_tracks(
             for t in sql_tracks:
                 t["similarity"] = 0.0   # no ANN similarity for SQL-fetched tracks
                 t["song_id"]    = t.get("song_id", t.get("id"))
-            matches = sql_tracks
+            matches = [t for t in sql_tracks if _has_playable_audio(t)]
+            if not matches:
+                logger.warning("Must-include artist '%s' has no playable URLs. Skipping.", artist_name)
+                continue
 
         # Take best 1–2 tracks per must-include artist
         selected.extend(matches[:2])
@@ -242,9 +293,12 @@ def fetch_must_include_genre_tracks(
         # Check candidates pool first
         matches = [
             t for t in candidates
-            if genre_name.lower() in (t.get("genre") or "").lower()
+            if _norm_genre(genre_name) in _norm_genre(t.get("genre"))
             and t.get("song_id") not in seen_ids
         ]
+
+        # Keep only playable tracks from the candidate pool.
+        matches = [t for t in matches if _has_playable_audio(t)]
 
         if not matches:
             # SQL fallback
@@ -255,7 +309,13 @@ def fetch_must_include_genre_tracks(
             for t in sql_tracks:
                 t["similarity"] = 0.0
                 t["song_id"] = t.get("song_id", t.get("id"))
-            matches = [t for t in sql_tracks if t.get("song_id") not in seen_ids]
+            matches = [
+                t for t in sql_tracks
+                if t.get("song_id") not in seen_ids and _has_playable_audio(t)
+            ]
+            if not matches:
+                logger.warning("Must-include genre '%s' has no playable URLs. Skipping.", genre_name)
+                continue
 
         # Take up to 4 tracks per genre
         for t in matches[:4]:
@@ -266,3 +326,13 @@ def fetch_must_include_genre_tracks(
             break
 
     return selected[:cap]
+
+
+# ─── Public aliases for use outside this module ───────────────────────────────
+
+def apply_hard_filters(candidates: list, day_part: dict, inputs: dict, relax: float = 0.0) -> list:
+    return _apply_hard_filters(candidates, day_part, inputs, relax)
+
+
+def apply_exclusion_filters_only(candidates: list, inputs: dict) -> list:
+    return _apply_exclusion_filters_only(candidates, inputs)

@@ -78,19 +78,76 @@ def run_startup_checks(exit_on_fatal: bool = True) -> None:
 
 # ─── Data fetch helpers ───────────────────────────────────────────────────────
 
-def fetch_all_songs() -> list[dict]:
-    """Fetch all rows from the songs table (paginates past the 1000-row default limit)."""
+_SONG_COLS = (
+    "id,title,artist,url,tempo_bpm,duration_seconds,"
+    "energy,danceability,loudness,acousticness,instrumentalness,"
+    "speechness,genre,valence"
+)
+
+# DB stores energy on ~0–0.15 scale and valence on ~0–9 scale.
+# Normalize both to 0–1 so the pipeline's filters and MMR work correctly.
+_ENERGY_MAX  = 0.15
+_VALENCE_MAX = 9.0
+
+
+def _normalize(songs: list[dict]) -> list[dict]:
+    for s in songs:
+        raw_e = float(s.get("energy")  or 0)
+        raw_v = float(s.get("valence") or 0)
+        s["energy"]  = min(raw_e / _ENERGY_MAX,  1.0)
+        s["valence"] = min(raw_v / _VALENCE_MAX, 1.0)
+    return songs
+
+
+def _paginate(query) -> list[dict]:
+    """Run a Supabase query with pagination and return all rows."""
     all_rows = []
     page_size = 1000
     offset = 0
     while True:
-        result = get_supabase().table("songs").select("*").range(offset, offset + page_size - 1).execute()
-        batch = result.data or []
+        batch = (query.range(offset, offset + page_size - 1).execute().data or [])
         all_rows.extend(batch)
         if len(batch) < page_size:
             break
         offset += page_size
     return all_rows
+
+
+_song_cache: list[dict] = []
+_song_cache_ts: float = 0.0
+_SONG_CACHE_TTL = 300.0   # 5 minutes
+
+
+def fetch_all_songs() -> list[dict]:
+    """Fetch all rows from the songs table, normalized and cached for 5 minutes."""
+    import time
+    global _song_cache, _song_cache_ts
+    if _song_cache and (time.time() - _song_cache_ts) < _SONG_CACHE_TTL:
+        return list(_song_cache)
+    rows = _normalize(_paginate(get_supabase().table("songs").select(_SONG_COLS)))
+    _song_cache = rows
+    _song_cache_ts = time.time()
+    return list(rows)
+
+
+def fetch_songs_filtered(
+    tempo_min: float = 60,   tempo_max: float = 180,
+    energy_min: float = 0.0, energy_max: float = 1.0,
+    valence_min: float = 0.0, valence_max: float = 1.0,
+) -> list[dict]:
+    """Fetch only songs matching the numeric bounds — avoids pulling the full 18k catalog."""
+    q = (
+        get_supabase()
+        .table("songs")
+        .select(_SONG_COLS)
+        .gte("tempo_bpm",  tempo_min)
+        .lte("tempo_bpm",  tempo_max)
+        .gte("energy",     energy_min)
+        .lte("energy",     energy_max)
+        .gte("valence",    valence_min)
+        .lte("valence",    valence_max)
+    )
+    return _paginate(q)
 
 
 def fetch_songs_not_yet_embedded() -> list[dict]:
@@ -154,30 +211,23 @@ def search_by_embedding(
 
 
 def fetch_songs_by_artist(artist_name: str) -> list[dict]:
-    """
-    Direct SQL fallback for must-include artists not found in ANN results.
-    Uses ILIKE for case-insensitive partial match.
-    """
     result = (
         get_supabase()
         .table("songs")
-        .select("*")
+        .select(_SONG_COLS)
         .ilike("artist", f"%{artist_name}%")
         .execute()
     )
-    return result.data or []
+    return _normalize(result.data or [])
 
 
 def fetch_songs_by_genre(genre_name: str) -> list[dict]:
-    """
-    Direct SQL fetch for must-include genres not found in ANN results.
-    Uses ILIKE for case-insensitive partial match.
-    """
+    normalized = genre_name.lower().replace(' ', '_').replace('/', '_').replace('-', '_')
     result = (
         get_supabase()
         .table("songs")
-        .select("*")
-        .ilike("genre", f"%{genre_name}%")
+        .select(_SONG_COLS)
+        .ilike("genre", f"%{normalized}%")
         .execute()
     )
-    return result.data or []
+    return _normalize(result.data or [])

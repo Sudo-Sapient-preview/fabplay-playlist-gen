@@ -71,12 +71,17 @@
     const params = new URLSearchParams(window.location.hash.substring(1));
     const access_token  = params.get('access_token');
     const refresh_token = params.get('refresh_token');
-    const type          = params.get('type'); // signup | recovery | magiclink
+    const type          = params.get('type');
 
     if (access_token) {
-      storeSession(access_token, refresh_token);
-      msgEl.textContent = 'Verified! Redirecting…';
-      setTimeout(() => { window.location.href = '/dashboard'; }, 800);
+      msgEl.textContent = 'Email confirmed!';
+      subEl.textContent = 'Redirecting…';
+      if (type === 'recovery') {
+        storeSession(access_token, refresh_token);
+        setTimeout(() => { window.location.href = '/dashboard'; }, 800);
+      } else {
+        setTimeout(() => { window.location.href = '/login?confirmed=true'; }, 800);
+      }
       return;
     }
 
@@ -96,16 +101,15 @@
       });
       const data = await r.json();
       if (!r.ok) { showError(data.error_description || 'Could not verify.'); return; }
-      storeSession(data.access_token, data.refresh_token);
-      msgEl.textContent = 'Verified! Redirecting…';
-      setTimeout(() => { window.location.href = '/dashboard'; }, 800);
+      msgEl.textContent = 'Email confirmed!';
+      subEl.textContent = 'Redirecting to sign in…';
+      setTimeout(() => { window.location.href = '/login?confirmed=true'; }, 800);
     } catch(e) {
       showError('Connection error during verification.');
     }
     return;
   }
 
-  // ── Nothing recognised
   showError('No verification token found in this link.');
 })();
 </script>

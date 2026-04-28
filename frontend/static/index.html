@@ -85,11 +85,58 @@
   </div>
 </div>
 
+<!-- ─── PLAYLISTS HOME ─── -->
+<div x-show="page==='playlists-home'" class="fade" id="page-playlists-home">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">My Playlists</h1>
+      <p class="page-sub" x-text="brands.filter(b=>(b.playlist_count||0)>0).length+' playlist'+(brands.filter(b=>(b.playlist_count||0)>0).length!==1?'s':'')"></p>
+    </div>
+    <button @click="page='brand-create'" class="btn btn-r">+ Add Another Playlist</button>
+  </div>
+  <div class="px-7 py-6">
+    <!-- Empty state -->
+    <div x-show="!brands.filter(b=>(b.playlist_count||0)>0).length" class="card py-20 text-center">
+      <div class="empty-ico">🎵</div>
+      <p class="font-semibold mt-3">No playlists yet</p>
+      <p class="text-sm text-[var(--muted)] mt-1">Create your first playlist to get started</p>
+      <button @click="page='brand-create'" class="btn btn-r mt-5">Create Playlist</button>
+    </div>
+    <!-- Grid -->
+    <div class="grid grid-cols-3 gap-5">
+      <template x-for="b in brands.filter(b=>(b.playlist_count||0)>0)" :key="b.id">
+        <div class="brand-card" style="position:relative;cursor:pointer" @click="openPlaylist(b.id)">
+          <div style="pointer-events:none">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="brand-emoji" :style="'background:'+catColor(b.category)+'15'" x-text="catEmoji(b.category)"></div>
+              <div style="flex:1;min-width:0">
+                <div class="font-bold text-sm" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="b.playlist_name||b.brand_name"></div>
+                <div class="text-xs mt-0.5" style="color:var(--faint)" x-text="catLabel(b.category)"></div>
+              </div>
+            </div>
+            <div class="flex items-center text-xs mt-auto pt-2" style="border-top:1px solid var(--bdr);color:var(--faint)">
+              <span x-text="b.last_generated_at?'Generated '+_timeAgo(b.last_generated_at):b.last_updated?'Updated '+_timeAgo(b.last_updated):'—'"></span>
+            </div>
+          </div>
+          <!-- 3-dot menu -->
+          <div style="position:absolute;top:10px;right:10px" @click.stop x-data="{open:false}">
+            <button @click="open=!open" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px 6px;border-radius:4px;font-size:18px;line-height:1">⋮</button>
+            <div x-show="open" @click.away="open=false" style="position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--bdr);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:130px;overflow:hidden">
+              <button @click="openRenameModal(b.id,b.playlist_name||b.brand_name);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:var(--text)">Rename</button>
+              <button @click="deleteBrand(b.id,b.playlist_name||b.brand_name);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:#DC2626">Delete</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
 <!-- ─── CREATE NEW BRAND (5-step wizard) ─── -->
 <div x-show="page==='brand-create'" class="fade" id="page-create">
   <div class="page-header">
     <div class="flex items-center gap-3">
-      <button @click="curBrand?page='soundboard':page='brands'" class="btn-back">
+      <button @click="curBrand?page='soundboard':goHome()" class="btn-back">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
       <div>
@@ -183,7 +230,7 @@
       <!-- What do people do here -->
       <div>
         <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">What do people do here?</label>
-        <p class="text-xs text-[var(--muted)] mb-2">AI suggestions — tap to select</p>
+        <p class="text-xs text-[var(--muted)] mb-2" x-text="analyzing?'Generating AI suggestions…':'AI suggestions — tap to select'"></p>
         <div class="flex flex-wrap gap-2">
           <template x-for="a in suggestions.activities" :key="a">
             <button type="button" @click="toggleChip(form.visitor_activity,a)"
@@ -277,7 +324,7 @@
       <div>
         <label class="lbl mb-2">Must-Include Genres</label>
         <div class="flex flex-wrap gap-2">
-          <template x-for="g in allGenres.filter(g=>!form.exclude_genres.includes(g))" :key="g">
+          <template x-for="g in genres.filter(g=>!form.exclude_genres.includes(g))" :key="g">
             <button type="button" @click="toggleGenre('include_genres',g,form)" :class="form.include_genres.includes(g)?'genre-btn active-include':'genre-btn'" x-text="g"></button>
           </template>
         </div>
@@ -285,7 +332,7 @@
       <div>
         <label class="lbl mb-2">Must-Exclude Genres</label>
         <div class="flex flex-wrap gap-2">
-          <template x-for="g in allGenres.filter(g=>!form.include_genres.includes(g))" :key="g">
+          <template x-for="g in genres.filter(g=>!form.include_genres.includes(g))" :key="g">
             <button type="button" @click="toggleGenre('exclude_genres',g,form)" :class="form.exclude_genres.includes(g)?'genre-btn active-exclude':'genre-btn'" x-text="g"></button>
           </template>
         </div>
@@ -323,7 +370,7 @@
         <button @click="createStep--" class="btn btn-w">← Back</button>
         <button @click="submitBrand()" class="btn btn-green" :disabled="submitting">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          <span x-text="submitting?'Creating...':'Create & Generate Sound Board'"></span>
+          <span x-text="submitting?'Creating...':'Generate Soundboard'"></span>
         </button>
       </div>
     </div>
@@ -334,7 +381,7 @@
 <div x-show="page==='soundboard'" class="fade" id="page-soundboard">
   <div class="page-header">
     <div class="flex items-center gap-3">
-      <button @click="page='brands'" class="btn-back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button @click="goHome()" class="btn-back" title="My Playlists"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
       <div>
         <div class="flex items-center gap-2">
           <h1 class="page-title" x-text="curBrand?.brand_name||'Sound Board'"></h1>
@@ -342,12 +389,6 @@
         </div>
         <p class="page-sub" x-text="curPl?.sound_board?'Brand intelligence & sound board':'Playlist not generated yet'"></p>
       </div>
-    </div>
-    <div class="flex gap-2" x-show="curBrand">
-      <button @click="generateSoundboard(curBrand?.id)" class="btn btn-r">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        Regenerate Storyboard
-      </button>
     </div>
   </div>
 
@@ -373,29 +414,20 @@
             </template>
           </div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
-          <div style="cursor:pointer;transition:opacity 0.2s" class="hover:opacity-75" @click="showRadarModal=true; $nextTick(() => initSbChartsModal())" title="Click to enlarge and drag points to edit">
-            <div style="position:relative;width:250px;height:250px;background:linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0.72));border:1px solid rgba(31,41,55,0.14);border-radius:14px;padding:10px;box-shadow:inset 0 0 0 1px rgba(31,41,55,0.04);">
-              <canvas id="sb-radar" width="250" height="250" style="display:block;width:100%;height:100%;"></canvas>
-            </div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%">
+          <div style="cursor:pointer;transition:opacity 0.2s;width:100%;max-width:260px" class="hover:opacity-75" @click="showRadarModal=true; $nextTick(() => initSbChartsModal())" title="Click to enlarge and drag points to edit">
+            <canvas id="sb-radar" style="display:block;width:100%;"></canvas>
             <p class="text-xs mt-2 text-center" style="color:var(--faint);letter-spacing:.05em">Aaker Brand Personality</p>
           </div>
-          <button x-show="sbProfileDirty" @click="saveProfileChanges()" class="btn btn-r mt-3" style="font-size:12px;padding:5px 14px;height:auto">Save Changes</button>
         </div>
       </div>
     </div>
 
     <!-- Audio Parameters -->
-    <div class="card p-6">
+    <div class="card p-6" style="border:none">
       <div class="flex items-center justify-between mb-5">
         <h3 class="font-bold">Acoustic Design Elements</h3>
-        <div class="flex items-center gap-2">
-          <button @click="resetAllAcousticTargets()" class="btn btn-w" style="font-size:12px;padding:5px 12px;height:auto;display:flex;align-items:center;gap:5px" title="Reset all sliders to AI-generated defaults">
-            <svg style="width:12px;height:12px;flex-shrink:0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            Refresh
-          </button>
-          <button x-show="sbAcousticDirty" @click="saveAcousticChanges()" class="btn btn-r" style="font-size:12px;padding:5px 12px;height:auto">Save Changes</button>
-        </div>
+        <button :disabled="!sbAcousticDirty" @click="saveAcousticChanges()" class="btn btn-r" :style="!sbAcousticDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
       </div>
       <div class="grid grid-cols-2 gap-x-10 gap-y-2">
         <template x-for="p in sbAudioParams()" :key="p.label">
@@ -433,11 +465,11 @@
     <div class="card p-6">
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-bold">Genre Hard Filters</h3>
-        <button x-show="sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" style="font-size:12px;padding:5px 14px;height:auto">Save Changes</button>
+        <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
       </div>
       <p class="text-xs text-[var(--muted)] mb-3">Click to cycle: <span style="color:#10B981" class="font-semibold">Include</span> → <span style="color:var(--red)" class="font-semibold">Exclude</span> → Neutral. Save to apply to next playlist.</p>
       <div class="flex flex-wrap gap-2">
-        <template x-for="g in allGenres" :key="g">
+        <template x-for="g in genres" :key="g">
           <button type="button" @click="toggleSbGenre(g)" :class="sbExcluded(g)?'genre-btn active-exclude':(sbIncluded(g)?'genre-btn active-include':'genre-btn')" x-text="(sbIncluded(g)?'✓ ':sbExcluded(g)?'✕ ':'')+g"></button>
         </template>
       </div>
@@ -447,7 +479,7 @@
     <div class="card p-6">
       <div class="flex items-center justify-between mb-4">
         <h3 class="font-bold">Day-Part Timeline</h3>
-        <button x-show="sbTimelineDirty" @click="saveTimelineChanges()" class="btn btn-r" style="font-size:12px;padding:5px 14px;height:auto">Save Changes</button>
+        <button :disabled="!sbTimelineDirty" @click="saveTimelineChanges()" class="btn btn-r" :style="!sbTimelineDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
       </div>
       <div class="flex rounded-lg overflow-hidden mb-3" style="height:44px">
         <template x-for="(dp,i) in (curBrand?.sound_board_result?.day_parts||[])" :key="i">
@@ -486,23 +518,27 @@
 <div x-show="page==='playlists'" class="fade" id="page-playlists">
   <div class="page-header">
     <div class="flex items-center gap-3">
-      <button @click="page='soundboard'" class="btn-back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button @click="goHome()" class="btn-back" title="My Playlists"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
       <div>
-        <h1 class="page-title">Day-Part Playlists</h1>
+        <h1 class="page-title" x-text="curBrand?.playlist_name||curBrand?.brand_name||'Playlist'"></h1>
         <p class="page-sub" x-text="(curBrand?.brand_name||'')+(curPl?.day_parts?.length?' — '+curPl.day_parts.length+' time slots':'')"></p>
       </div>
     </div>
     <div class="flex gap-2">
+      <button @click="goToSoundboard()" class="btn btn-w">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+        Soundboard
+      </button>
       <button @click="generatePlaylist(curBrand?.id)" class="btn btn-w">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Regenerate Playlist
+        Regenerate
       </button>
     </div>
   </div>
   <div class="px-7 py-6" x-show="curPl?.day_parts?.length">
     <div class="flex gap-1 overflow-x-auto pb-2 mb-5">
       <template x-for="(dp,i) in (curPl?.day_parts??[])" :key="i">
-        <button @click="activeDp=i" class="dp-tab" :class="activeDp===i?'on':''">
+        <button @click="activeDp=i;plGenreFilter=''" class="dp-tab" :class="activeDp===i?'on':''">
           <span x-text="dp.name"></span>
           <span class="opacity-55 ml-1 text-[10px]" x-text="dp.start_time+'–'+dp.end_time"></span>
         </button>
@@ -519,40 +555,78 @@
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].tempo_target||0)+' BPM'"></div><div class="text-[10px] text-[var(--faint)]">tempo</div></div>
         </div>
         <div class="card-sm px-4 py-3"><p class="text-sm text-[var(--muted)] italic" x-text="curPl.day_parts[activeDp].character_description||'—'"></p></div>
-        <div class="card overflow-hidden">
-          <div class="tr bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:28px 30px 1fr 150px 110px 58px 56px 56px;border-bottom:1px solid var(--bdr);cursor:default">
-            <span></span><span>#</span><span>Title</span><span>Artist</span><span>Genre</span><span class="text-right">BPM</span><span class="text-right">BFS</span><span class="text-right">MMR</span>
+        <!-- Genre filter -->
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-xs font-semibold" style="color:var(--muted)">Genre</span>
+          <select x-model="plGenreFilter" class="text-xs rounded-lg px-2 py-1 outline-none" style="border:1px solid var(--bdr);background:#fff;color:var(--text);font-family:inherit;cursor:pointer">
+            <option value="">All Genres</option>
+            <template x-for="g in dpGenres" :key="g"><option :value="g" x-text="g"></option></template>
+          </select>
+          <span x-show="plGenreFilter" class="text-xs" style="color:var(--faint)" x-text="filteredDpTracks.length+' track'+(filteredDpTracks.length!==1?'s':'')"></span>
+        </div>
+
+        <div class="card" style="overflow:visible">
+          <!-- Remove selected bar -->
+          <div x-show="selectedCountInDp(activeDp)>0"
+               class="flex items-center justify-between px-4 py-2 bg-red-50 border-b border-red-100" style="border-radius:14px 14px 0 0">
+            <span class="text-xs font-semibold text-red-700" x-text="selectedCountInDp(activeDp)+' track'+(selectedCountInDp(activeDp)>1?'s':'')+' selected'"></span>
+            <button @click="removeSelectedTracks()"
+                    class="flex items-center gap-1.5 text-xs font-semibold text-red-700 hover:text-red-900 bg-transparent border-0 cursor-pointer px-2 py-1 rounded hover:bg-red-100 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              Remove selected
+            </button>
           </div>
-          <template x-for="(t,ti) in (curPl.day_parts[activeDp].tracks??[])" :key="ti">
-            <div class="tr" :class="npTrackKey===ti+'-'+activeDp?'playing':''" style="grid-template-columns:28px 30px 1fr 150px 110px 58px 56px 56px">
+          <div class="tr bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px;border-bottom:1px solid var(--bdr);cursor:default;position:relative;z-index:10">
+            <span></span><span>#</span><span>Title</span><span>Genre</span><span class="col-tip-wrap">BPM<span class="col-tip-icon">i<span class="col-tip-box">Beats Per Minute</span></span></span><span class="col-tip-wrap">BFS<span class="col-tip-icon">i<span class="col-tip-box">Brand Fit Score</span></span></span><span></span>
+          </div>
+          <div style="overflow:hidden;border-radius:0 0 14px 14px">
+          <template x-for="(t,ti) in filteredDpTracks" :key="t._origIdx">
+            <div class="tr" :class="npTrackKey===t._origIdx+'-'+activeDp?'playing':''" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px">
               <div class="flex items-center justify-center" @click.stop>
-                <input type="checkbox" :checked="isApproved(activeDp,ti)" @change="toggleApprove(activeDp,ti)" class="w-3.5 h-3.5 cursor-pointer accent-[var(--red)]">
+                <input type="checkbox" :checked="isApproved(activeDp,t._origIdx)" @change="toggleApprove(activeDp,t._origIdx)" class="w-3.5 h-3.5 cursor-pointer accent-[var(--red)]">
               </div>
-              <span class="tr-num text-[11px] text-[var(--faint)]" x-text="ti+1"></span>
+              <span class="tr-num text-[11px] text-[var(--faint)]" x-text="t._origIdx+1"></span>
               <!-- Title column with inline play/pause -->
               <div class="flex items-center gap-1.5 min-w-0" @click.stop>
-                <button @click="npTrackKey===ti+'-'+activeDp ? togglePlay() : playTrack(t,ti,activeDp)"
+                <button @click="npTrackKey===t._origIdx+'-'+activeDp ? togglePlay() : playTrack(t,t._origIdx,activeDp)"
                         class="flex-shrink-0 transition-colors bg-transparent border-0 p-0 cursor-pointer outline-none"
-                        :class="npTrackKey===ti+'-'+activeDp?'text-[var(--red)]':'text-[var(--faint)] hover:text-[var(--txt)]'">
-                  <svg x-show="!(npTrackKey===ti+'-'+activeDp && npPlaying)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M8 5.14v14l11-7-11-7z"/></svg>
-                  <svg x-show="npTrackKey===ti+'-'+activeDp && npPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        :class="npTrackKey===t._origIdx+'-'+activeDp?'text-[var(--red)]':'text-[var(--faint)] hover:text-[var(--txt)]'">
+                  <svg x-show="!(npTrackKey===t._origIdx+'-'+activeDp && npPlaying)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+                  <svg x-show="npTrackKey===t._origIdx+'-'+activeDp && npPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                 </button>
                 <span class="font-medium text-xs truncate" x-text="t.title||'Unknown'"></span>
               </div>
-              <span class="text-xs text-[var(--faint)] truncate" x-text="t.artist||'—'"></span>
               <span class="text-xs text-[var(--faint)] truncate" x-text="t.genre||'—'"></span>
-              <span class="text-xs text-right text-[var(--faint)]" x-text="t.bpm||'—'"></span>
+              <span class="text-xs text-right font-bold text-blue-600" x-text="t.bpm||'—'"></span>
               <span class="text-xs text-right font-bold" :class="t.bfs>=.75?'text-emerald-600':t.bfs>=.5?'text-amber-500':'text-red-500'" x-text="(t.bfs||0).toFixed(3)"></span>
-              <span class="text-xs text-right font-bold text-purple-600" x-text="(t.mmr_score||0).toFixed(3)"></span>
+              <!-- Replace button -->
+              <div class="flex items-center justify-center" @click.stop>
+                <button x-show="replacingTrack!==activeDp+'-'+t._origIdx && isApproved(activeDp,t._origIdx)"
+                        @click="replaceTrack(activeDp,t._origIdx,t.song_id)"
+                        title="Replace with nearest match"
+                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                </button>
+                <span x-show="replacingTrack===activeDp+'-'+t._origIdx" class="inline-block w-3.5 h-3.5 border-2 border-[var(--faint)] border-t-[var(--accent)] rounded-full animate-spin"></span>
+              </div>
             </div>
           </template>
+          </div>
         </div>
       </div>
     </template>
   </div>
-  <div x-show="!curPl?.day_parts?.length" class="p-16 text-center">
+  <!-- Loading state while fetching playlist -->
+  <div x-show="plLoading && !curPl?.day_parts?.length" class="p-16 text-center">
+    <div class="inline-block w-8 h-8 border-4 border-[var(--bdr)] border-t-[var(--accent)] rounded-full animate-spin mb-4"></div>
+    <p class="text-sm text-[var(--muted)]">Loading playlist…</p>
+  </div>
+  <!-- No playlist (genuinely empty — not loading) -->
+  <div x-show="!plLoading && !curPl?.day_parts?.length" class="p-16 text-center">
     <div class="empty-ico">🎵</div>
-    <p class="font-semibold mt-3">No playlists yet</p>
+    <p class="font-semibold mt-3">No playlist generated yet</p>
     <button @click="generatePlaylist(curBrand?.id)" class="btn btn-r mt-4">Generate Now</button>
   </div>
 </div>
@@ -722,7 +796,46 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=16"></script>
+<!-- ══════════ PLAYLIST NAMING MODAL ══════════ -->
+<div x-show="showNamingModal" class="modal-bg" x-cloak @click.self="showNamingModal=false" >
+  <div class="modal-box p-8" style="max-width:440px;width:100%;text-align:left">
+    <h2 style="font-family:var(--font-heading);font-size:20px;font-weight:700;margin-bottom:6px">Name your playlist</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Give it a name — you can always rename it later.</p>
+    <input
+      type="text"
+      x-model="pendingPlaylistName"
+      @keydown.enter="confirmNamingModal()"
+      placeholder="e.g. Café Zara — Morning Mix"
+      style="width:100%;padding:10px 13px;font-size:14px;font-family:inherit;border:1px solid var(--bdr);border-radius:7px;background:var(--bg);color:var(--text);outline:none;margin-bottom:20px"
+      x-init="$el.focus()"
+    >
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button @click="showNamingModal=false" style="padding:9px 20px;font-size:13px;font-weight:600;font-family:inherit;border:1px solid var(--bdr);border-radius:7px;background:none;cursor:pointer;color:var(--muted)">Cancel</button>
+      <button @click="confirmNamingModal()" :disabled="!pendingPlaylistName.trim()" class="btn btn-r" style="margin-top:0;opacity:1" :style="!pendingPlaylistName.trim()?'opacity:.5;cursor:not-allowed':''">Generate Playlist</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ PLAYLIST RENAME MODAL ══════════ -->
+<div x-show="showRenameModal" class="modal-bg" x-cloak @click.self="showRenameModal=false" >
+  <div class="modal-box p-8" style="max-width:440px;width:100%;text-align:left">
+    <h2 style="font-family:var(--font-heading);font-size:20px;font-weight:700;margin-bottom:20px">Rename playlist</h2>
+    <input
+      type="text"
+      x-model="renameValue"
+      @keydown.enter="confirmRename()"
+      placeholder="Playlist name"
+      style="width:100%;padding:10px 13px;font-size:14px;font-family:inherit;border:1px solid var(--bdr);border-radius:7px;background:var(--bg);color:var(--text);outline:none;margin-bottom:20px"
+      x-init="$el.focus()"
+    >
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button @click="showRenameModal=false" style="padding:9px 20px;font-size:13px;font-weight:600;font-family:inherit;border:1px solid var(--bdr);border-radius:7px;background:none;cursor:pointer;color:var(--muted)">Cancel</button>
+      <button @click="confirmRename()" :disabled="!renameValue.trim()" class="btn btn-r" style="margin-top:0" :style="!renameValue.trim()?'opacity:.5;cursor:not-allowed':''">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>
 

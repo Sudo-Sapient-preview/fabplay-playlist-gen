@@ -28,6 +28,11 @@ return {
   activeDp: 0,
   showGen: false,
   showRadarModal: false,
+  showNamingModal: false,
+  pendingPlaylistName: '',
+  showRenameModal: false,
+  renameValue: '',
+  renamingBrandId: null,
   genMode: '',
   genTask: null,
   genInterval: null,
@@ -68,8 +73,11 @@ return {
   npQueueIdx: 0,
   isScrubbing: false,
 
-  // Approval state: keyed by "dpIdx-trackIdx"
+  // Approval / selection state: keyed by "dpIdx-trackIdx"
   approvedTracks: {},
+  replacingTrack: null,
+  plGenreFilter: '',
+  plLoading: false,
 
   form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''},
 
@@ -91,7 +99,9 @@ return {
     {v:'luxury',l:'Luxury',d:'Ultra-premium'}
   ],
 
-  allGenres: ['Pop','House','Chillout','Indie','Lounge','Afro Pop','Dance','Rock','Europop','Ambient','Orchestral','Electronic','Electropop','Deep House','Jazz','Diwali / Festive','Tropical House','Folk','Blues','Bollywood','Soul','Trance','R&B','Wedding','Carnatic Classical','Indian Classical','Hip Hop','Christmas','Funk','Indie Rock','Indie Pop'],
+  allGenres: ['Blues','Classical','Country','Electronic','Hip Hop','Jazz','Latin','Other','Pop','Reggae','Rock','Soul/Funk'],
+  catalogGenres: [], // loaded from DB — falls back to allGenres if empty
+  catalogGenresLoaded: false,
 
   spParams: [
     {k:'energy_target',l:'Energy',c:'#EF4444',fmt:v=>v.toFixed(2),pct:v=>v*100},
@@ -105,37 +115,37 @@ return {
   ],
 
   async init(){
-    // ── Auth preflight ──────────────────────────
     if (!this.authToken()) { window.location.href = '/login'; return; }
+    // Single bootstrap call: user + brands in one round trip
     try {
-      const me = await this.apiFetch('/api/auth/me');
-      if (!me) return; // apiFetch already redirected to /login
-      if (me.status === 401) { window.location.href = '/login'; return; }
-      if (me.ok) {
-        const meData = await me.json();
-        this.currentUser = meData;
-        this.currentRole = meData.role;
-      } else {
-        console.warn('Auth check returned', me.status, '— continuing to routing');
-      }
-    } catch(e) { console.warn('Auth check error:', e); }
-    // ── End auth preflight ──────────────────────
+      const r = await this.apiFetch('/api/init');
+      if (!r) return;
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      if (!r.ok) { window.location.href = '/login'; return; }
+      const { user, brands } = await r.json();
+      this.currentUser = user;
+      this.currentRole = user.role;
+      this.brands = brands;
+    } catch(e) { window.location.href = '/login'; return; }
 
     this.player = new Audio();
     this._bindPlayer();
-    await this.loadBrands(); // only brands needed to route
 
     // ── Smart routing ────────────────────────────
     if (!this.brands.length) {
       this.page = 'brand-create';
+    } else if (this.brands.some(b => (b.playlist_count||0) > 0)) {
+      // At least one generated playlist → show home grid
+      this.page = 'playlists-home';
     } else {
-      const active = this.brands.find(b => b.sound_board_result || b.playlist_count > 0) || this.brands[0];
+      // Brands exist but none have a playlist yet → open soundboard of best candidate
+      const active = this.brands.find(b => b.sound_board_result) || this.brands[0];
       await this.openBrand(active.id);
     }
     this.loading = false;
 
     // Load non-critical data in background after UI is shown
-    Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats()]);
+    Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres()]);
 
     this.$watch('page', async val => {
       if(val==='soundboard'){
@@ -146,8 +156,10 @@ return {
         }
         this.scheduleSbChartsInit();
       }
-      if(val==='playlists' && this.curBrand && !this.curPl){
+      if(val==='playlists' && this.curBrand && !this.curPl && !this.plLoading){
+        this.plLoading=true;
         try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
+        this.plLoading=false;
       }
     });
     this.$watch('curBrand', () => {
@@ -162,6 +174,28 @@ return {
   async loadBrands(){ try{ const r=await this.apiFetch('/api/brands'); if(r&&r.ok)this.brands=await r.json() }catch(e){} },
   async loadActivity(){ try{ const r=await this.apiFetch('/api/activity'); if(r&&r.ok)this.activity=await r.json() }catch(e){} },
   async loadCatalogStats(){ try{ const r=await this.apiFetch('/api/catalog/stats'); if(r&&r.ok)this.catalogStats=await r.json() }catch(e){} },
+  _fmtGenre(g){
+    const map={'hip_hop':'Hip Hop','soul_funk':'Soul/Funk','r_b':'R&B'};
+    return map[g]||g.split(/[_\s]+/).map(w=>w?w[0].toUpperCase()+w.slice(1):'').join(' ');
+  },
+  async loadCatalogGenres(){
+    try{
+      const r=await this.apiFetch('/api/catalog/genres');
+      if(r&&r.ok){
+        const d=await r.json();
+        const dbGenres=(d.genres||[]).map(g=>(g||'').trim()).filter(Boolean);
+        const seen=new Set();
+        const uniq=[];
+        dbGenres.forEach(g=>{
+          const display=this._fmtGenre(g);
+          const k=display.toLowerCase();
+          if(!seen.has(k)){seen.add(k);uniq.push(display);}
+        });
+        this.catalogGenres=uniq.sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+        this.catalogGenresLoaded=true;
+      }
+    }catch(e){}
+  },
   async loadCatalog(){
     try{
       const [s,songs]=await Promise.all([this.apiFetch('/api/catalog/stats'),this.apiFetch('/api/catalog/songs')]);
@@ -170,10 +204,28 @@ return {
     }catch(e){}
   },
 
+  get genres(){
+    return this.catalogGenres.length ? this.catalogGenres : this.allGenres;
+  },
+
   get filteredBrands(){
     if(!this.brandSearch) return this.brands;
     const q=this.brandSearch.toLowerCase();
     return this.brands.filter(b=>(b.brand_name||'').toLowerCase().includes(q)||(b.category||'').toLowerCase().includes(q));
+  },
+
+  get dpGenres(){
+    const tracks=this.curPl?.day_parts?.[this.activeDp]?.tracks||[];
+    const seen=new Set();
+    tracks.forEach(t=>{if(t.genre)seen.add(t.genre)});
+    return [...seen].sort();
+  },
+
+  get filteredDpTracks(){
+    const tracks=this.curPl?.day_parts?.[this.activeDp]?.tracks||[];
+    const indexed=tracks.map((t,i)=>({...t,_origIdx:i}));
+    if(!this.plGenreFilter)return indexed;
+    return indexed.filter(t=>t.genre===this.plGenreFilter);
   },
 
   async openBrand(id){
@@ -241,25 +293,33 @@ return {
 
   // ── Brand creation ─────────────────────────
   async analyzeAndContinue(){
+    // Step should advance only after analysis completes.
     this.analyzing=true;
     try{
       const r=await this.apiFetch('/api/quick-analyze',{method:'POST',body:JSON.stringify({brand_name:this.form.brand_name,website_url:this.form.website_url,category:this.form.category})});
-      if(r.ok){
-        const s=await r.json();
-        if(s.customer_segment)this.form.customer_segment=s.customer_segment;
-        if(s.age_min)this.form.age_min=s.age_min;
-        if(s.age_max)this.form.age_max=s.age_max;
-        if(s.brand_description&&!this.form.brand_description)this.form.brand_description=s.brand_description;
-        this.suggestions.activities=s.suggested_activities||[];
-        this.suggestions.customer_types=s.suggested_customer_types||[];
-        this.suggestions.lifestyle=s.suggested_lifestyle||[];
-        // Pre-select all suggestions — user can deselect individually
-        this.form.visitor_activity=[...this.suggestions.activities];
-        this.form.customer_types=[...this.suggestions.customer_types];
-        this.form.lifestyle_tags=[...this.suggestions.lifestyle];
+      if(!r||!r.ok){
+        alert('Could not analyze brand details right now. Please try again.');
+        return;
       }
-    }catch(e){}
-    finally{this.analyzing=false;this.createStep++}
+      const s=await r.json();
+      if(s.customer_segment)this.form.customer_segment=s.customer_segment;
+      if(s.age_min)this.form.age_min=s.age_min;
+      if(s.age_max)this.form.age_max=s.age_max;
+      if(s.brand_description&&!this.form.brand_description)this.form.brand_description=s.brand_description;
+      this.suggestions.activities=s.suggested_activities||[];
+      this.suggestions.customer_types=s.suggested_customer_types||[];
+      this.suggestions.lifestyle=s.suggested_lifestyle||[];
+      // Only pre-select if user hasn't already made manual selections
+      if(!this.form.visitor_activity.length)this.form.visitor_activity=[...this.suggestions.activities];
+      if(!this.form.customer_types.length)this.form.customer_types=[...this.suggestions.customer_types];
+      if(!this.form.lifestyle_tags.length)this.form.lifestyle_tags=[...this.suggestions.lifestyle];
+      // Ensure DB-backed genres are ready by the time user reaches the genre step.
+      if(!this.catalogGenresLoaded) await this.loadCatalogGenres();
+      this.createStep++;
+    }catch(e){
+      alert('Could not analyze brand details right now. Please try again.');
+    }
+    finally{this.analyzing=false}
   },
 
   async analyzeAssetsAndContinue(){
@@ -272,9 +332,9 @@ return {
       if(r&&r.ok){
         const data=await r.json();
         this.assetAnalysis=data.asset_analysis||'';
-        const knownLower=this.allGenres.map(g=>g.toLowerCase());
-        if(data.recommended_genres?.length){data.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
-        if(data.avoid_genres?.length){data.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?this.allGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
+        const knownGenres=this.genres;const knownLower=knownGenres.map(g=>g.toLowerCase());
+        if(data.recommended_genres?.length){data.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
+        if(data.avoid_genres?.length){data.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
         if(data.music_notes&&!this.form.music_notes)this.form.music_notes=data.music_notes;
       } else if(r) {
         const txt=await r.text().catch(()=>'');
@@ -432,12 +492,23 @@ return {
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
     this.sbNeedsGeneration=false;
-    // Show modal immediately so user gets instant feedback
+    // First generation — prompt for a playlist name first
+    if((this.curBrand?.playlist_count||0)===0){
+      this.pendingPlaylistName=this.curBrand?.brand_name||'';
+      this.showNamingModal=true;
+      return;
+    }
+    await this._startGenerate(id,null);
+  },
+
+  async _startGenerate(id,playlistName){
     this.genMode='playlist';
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
     try{
-      const r=await this.apiFetch('/api/generate/'+id,{method:'POST',body:JSON.stringify({genre_overrides:this.sbGenreOverrides})});
+      const body={genre_overrides:this.sbGenreOverrides};
+      if(playlistName)body.playlist_name=playlistName;
+      const r=await this.apiFetch('/api/generate/'+id,{method:'POST',body:JSON.stringify(body)});
       if(!r||!r.ok)throw new Error('Server returned '+(r?.status||'error'));
       const {task_id}=await r.json();
       this.genTask.log=['Queued...'];
@@ -445,6 +516,55 @@ return {
     }catch(e){
       this.genTask={status:'error',progress:0,log:[],error:e.message};
     }
+  },
+
+  confirmNamingModal(){
+    const name=this.pendingPlaylistName.trim();
+    if(!name)return;
+    const id=this.curBrand?.id;
+    this.showNamingModal=false;
+    this._startGenerate(id,name);
+  },
+
+  // ── Playlist home navigation ───────────────
+  goHome(){ this.page='playlists-home'; },
+
+  async openPlaylist(id){
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    this.curPl=null;
+    this.activeDp=0;
+    this.plLoading=true;
+    this.page='playlists';
+    try{const r=await this.apiFetch('/api/playlists/'+id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
+    this.plLoading=false;
+  },
+
+  goToSoundboard(){
+    if(!this.curBrand)return;
+    const saved=localStorage.getItem('sbGenreOverrides_'+this.curBrand.id);
+    this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
+    this._origTargets={};this._origRanges={};
+    this.hasUnsavedChanges=false;this.sbAcousticDirty=false;this.sbGenreDirty=false;
+    this.sbTimelineDirty=false;this.sbProfileDirty=false;this.profileDirty=false;
+    this.page='soundboard';
+    this.scheduleSbChartsInit();
+  },
+
+  openRenameModal(id,currentName){
+    this.renamingBrandId=id;
+    this.renameValue=currentName;
+    this.showRenameModal=true;
+  },
+
+  async confirmRename(){
+    if(!this.renameValue.trim()||!this.renamingBrandId)return;
+    try{
+      await this.apiFetch('/api/brands/'+this.renamingBrandId+'/playlist-name',{method:'PATCH',body:JSON.stringify({name:this.renameValue.trim()})});
+      await this.loadBrands();
+      if(this.curBrand?.id===this.renamingBrandId){const b=this.brands.find(x=>x.id===this.renamingBrandId);if(b)this.curBrand=b;}
+    }catch(e){}
+    this.showRenameModal=false;this.renamingBrandId=null;this.renameValue='';
   },
 
   _pollGen(taskId,brandId){
@@ -464,8 +584,10 @@ return {
                 this.genTask.log=[...(this.genTask.log||[]),'Finalizing playlists...'];
                 await new Promise(res=>setTimeout(res,450));
               }
-              // Fetch playlist first so tracks show immediately on navigation
+              // Fetch playlist before navigating so tracks are ready on arrival
+              this.plLoading=true;
               if(brandId){try{const pr=await this.apiFetch('/api/playlists/'+brandId);if(pr&&pr.ok)this.curPl=await pr.json()}catch(e){}}
+              this.plLoading=false;
               this.showGen=false;
               this.genTask=null;
               this.page='playlists';
@@ -484,7 +606,8 @@ return {
     try{
       await this.apiFetch('/api/brands/'+id,{method:'DELETE'});
       await this.loadBrands();await this.loadStats();
-      if(this.curBrand?.id===id){this.curBrand=null;this.curPl=null;this.page='brands'}
+      if(this.curBrand?.id===id){this.curBrand=null;this.curPl=null;}
+      this.page='playlists-home';
     }catch(e){}
   },
 
@@ -704,18 +827,20 @@ return {
     },600);
   },
 
-  sbAllGenres(){return this.allGenres;},
+  sbAllGenres(){return this.genres;},
   sbIncluded(g){
     if(this.sbGenreOverrides.exclude.includes(g))return false;
     if(this.sbGenreOverrides.include.includes(g))return true;
-    const lower=this.allGenres.map(x=>x.toLowerCase());
-    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?this.allGenres[i]:x};
+    const canonical=this.genres;
+    const lower=canonical.map(x=>x.toLowerCase());
+    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?canonical[i]:x};
     return(this.curBrand?.include_genres||[]).map(norm).includes(g);
   },
   sbExcluded(g){
     if(this.sbGenreOverrides.include.includes(g))return false;
-    const lower=this.allGenres.map(x=>x.toLowerCase());
-    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?this.allGenres[i]:x};
+    const canonical=this.genres;
+    const lower=canonical.map(x=>x.toLowerCase());
+    const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?canonical[i]:x};
     return(this.curBrand?.exclude_genres||[]).map(norm).includes(g)||this.sbGenreOverrides.exclude.includes(g);
   },
   toggleSbGenre(g){
@@ -850,7 +975,6 @@ return {
     if(this.sbCharts.timeline){this.sbCharts.timeline.destroy();this.sbCharts.timeline=null}
     const rc=document.getElementById('sb-radar');
     if(rc){
-      rc.width=250;rc.height=250;
       if(typeof Chart==='undefined'){
         this._drawRadarFallback(rc, profile, false);
       } else {
@@ -877,10 +1001,10 @@ return {
               }]
             },
             options:{
-              responsive:false,
-              maintainAspectRatio:false,
+              responsive:true,
+              maintainAspectRatio:true,
               animation:{duration:0},
-              layout:{padding:16},
+              layout:{padding:{top:28,right:52,bottom:28,left:52}},
               scales:{
                 r:{
                   min:0,max:1,
@@ -1128,6 +1252,47 @@ return {
   togglePlay(){if(!this.player.src)return;this.player.paused?this.player.play():this.player.pause()},
   toggleApprove(dpIdx, ti){const k=dpIdx+'-'+ti;if(this.approvedTracks[k])delete this.approvedTracks[k];else this.approvedTracks[k]=true;this.approvedTracks={...this.approvedTracks}},
   isApproved(dpIdx, ti){return!!this.approvedTracks[dpIdx+'-'+ti]},
+  selectedCountInDp(dpIdx){return Object.keys(this.approvedTracks).filter(k=>k.startsWith(dpIdx+'-')).length},
+
+  async removeSelectedTracks(){
+    const dpIdx=this.activeDp;
+    const tracks=this.curPl?.day_parts?.[dpIdx]?.tracks||[];
+    const songIds=tracks.filter((_,ti)=>this.approvedTracks[dpIdx+'-'+ti]).map(t=>t.song_id).filter(Boolean);
+    if(!songIds.length)return;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks',{method:'DELETE',body:JSON.stringify({day_part_index:dpIdx,song_ids:songIds})});
+      if(!r||!r.ok)throw new Error('Remove failed');
+      const data=await r.json();
+      this.curPl.day_parts[dpIdx]=data.day_part;
+      // Clear selection for this day-part
+      Object.keys(this.approvedTracks).forEach(k=>{if(k.startsWith(dpIdx+'-'))delete this.approvedTracks[k]});
+      this.approvedTracks={...this.approvedTracks};
+      // If playing track was removed, stop player
+      if(this.npTrackKey&&this.npTrackKey.endsWith('-'+dpIdx)){
+        const [ti]=this.npTrackKey.split('-');
+        if(songIds.includes(tracks[+ti]?.song_id)){this.player.pause();this.npPlaying=false;this.npTrackKey=''}
+      }
+    }catch(e){alert('Could not remove tracks. Please try again.')}
+  },
+
+  async replaceTrack(dpIdx, ti, songId){
+    const key=dpIdx+'-'+ti;
+    this.replacingTrack=key;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks/replace',{method:'POST',body:JSON.stringify({day_part_index:dpIdx,song_id:songId})});
+      if(!r||!r.ok){const err=await r?.json().catch(()=>({}));throw new Error(err.detail||'Replace failed')}
+      const data=await r.json();
+      this.curPl.day_parts[dpIdx]=data.day_part;
+      // Deselect the replaced track
+      if(this.approvedTracks[key]){delete this.approvedTracks[key];this.approvedTracks={...this.approvedTracks}}
+      // If this track was playing, update the player to the replacement
+      if(this.npTrackKey===ti+'-'+dpIdx){
+        const rep=data.replacement;
+        if(rep?.src){this.player.src=rep.src;this.player.load();this.npTitle=rep.title||'';this.npArtist=rep.artist||''}
+      }
+    }catch(e){alert('Could not replace track: '+(e.message||'Please try again.'))}
+    finally{this.replacingTrack=null}
+  },
   nextTrack(){if(!this.npQueue.length)return;let n=this.npQueueIdx+1;while(n<this.npQueue.length&&!this.npQueue[n].src)n++;if(n<this.npQueue.length){this.npQueueIdx=n;const t=this.npQueue[n];this._loadAndPlay(t,t._ti,t._dpIdx)}},
   prevTrack(){if(!this.npQueue.length)return;let p=this.npQueueIdx-1;while(p>=0&&!this.npQueue[p].src)p--;if(p>=0){this.npQueueIdx=p;const t=this.npQueue[p];this._loadAndPlay(t,t._ti,t._dpIdx)}},
   seekTo(v){if(this.player)this.player.currentTime=+v},

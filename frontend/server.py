@@ -22,9 +22,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent / "songs")))
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(str(STATIC_DIR / "logo.jpg"), media_type="image/jpeg")
+
+
 @app.get("/")
 async def serve_landing():
-    return FileResponse(str(STATIC_DIR / "landing.html"))
+    return RedirectResponse("/login", status_code=302)
 
 
 @app.get("/login")

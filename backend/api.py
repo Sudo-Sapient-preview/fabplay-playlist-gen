@@ -12,12 +12,9 @@ import time
 import uuid
 import threading
 import logging
-import unicodedata
 from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
-import xml.etree.ElementTree as ET
 
 import httpx
 import uvicorn
@@ -30,11 +27,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
-from backend.db import get_supabase, run_startup_checks
+from backend.db import get_supabase, run_startup_checks, fetch_all_songs
 from brand_pipeline.brand_analysis import get_brand_profile
 from brand_pipeline.sound_board import get_sound_board, apply_segment_adjustments
-from pipeline.rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks
-from pipeline.mmr_scorer import mmr_select
+from pipeline.rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks, apply_hard_filters, apply_exclusion_filters_only
+from pipeline.mmr_scorer import mmr_select, compute_relevance, compute_track_sim
 from brand_pipeline.day_part_templates import get_template, get_day_part_hours, target_track_count
 
 load_dotenv()
@@ -42,48 +39,91 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+SONGS_BASE_URL = (os.getenv("SONGS_BASE_URL", "") or "").strip().rstrip("/")
 
 # ─── Auth config ──────────────────────────────────────────────────────────────
 
-SUPABASE_URL      = os.getenv("SUPABASE_URL", "")
+SUPABASE_URL         = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_ANON_KEY    = os.getenv("SUPABASE_ANON_KEY", "")
 _bearer = HTTPBearer()
+
+# Cache validated tokens for 60 s to avoid a Supabase round-trip on every request.
+_AUTH_CACHE_TTL = 60.0
+_auth_cache: dict[str, tuple[dict, float]] = {}
+
+# Cache user roles for 5 minutes — role changes are rare, DB round-trip is not worth it.
+_ROLE_CACHE_TTL = 300.0
+_role_cache: dict[str, tuple[str, float]] = {}
+
+# Persistent HTTP client — reuses TCP+TLS connections instead of creating one per request.
+_http_client: httpx.AsyncClient | None = None
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=10.0)
+    return _http_client
 
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
 ) -> dict:
-    """Validate a Supabase JWT by calling /auth/v1/user. Returns the user dict."""
+    """Validate a Supabase JWT, with a 60-second in-memory cache."""
     token = creds.credentials
+    now = time.time()
+
+    cached = _auth_cache.get(token)
+    if cached:
+        user_dict, expires_at = cached
+        if now < expires_at:
+            return user_dict
+        del _auth_cache[token]
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{SUPABASE_URL}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "apikey": SUPABASE_SERVICE_KEY,
-                },
-                timeout=10.0,
-            )
+        resp = await _get_http_client().get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_SERVICE_KEY,
+            },
+        )
     except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as e:
         raise HTTPException(status_code=503, detail="Auth service unavailable")
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return resp.json()
+
+    user_dict = resp.json()
+    _auth_cache[token] = (user_dict, now + _AUTH_CACHE_TTL)
+    # Evict entries beyond a reasonable limit to prevent unbounded growth.
+    if len(_auth_cache) > 500:
+        oldest = sorted(_auth_cache.items(), key=lambda x: x[1][1])[:100]
+        for k, _ in oldest:
+            _auth_cache.pop(k, None)
+    return user_dict
 
 
 async def get_current_role(user: dict = Depends(get_current_user)) -> str:
-    """Fetch this user's role from the user_roles table. Returns 'viewer' if no row found."""
+    """Fetch this user's role from the user_roles table, cached for 5 minutes."""
+    user_id = user["id"]
+    now = time.time()
+    cached = _role_cache.get(user_id)
+    if cached:
+        role, expires_at = cached
+        if now < expires_at:
+            return role
+        del _role_cache[user_id]
     result = (
         get_supabase()
         .table("user_roles")
         .select("role")
-        .eq("user_id", user["id"])
+        .eq("user_id", user_id)
         .maybe_single()
         .execute()
     )
-    return result.data["role"] if (result and result.data) else "viewer"
+    role = result.data["role"] if (result and result.data) else "viewer"
+    _role_cache[user_id] = (role, now + _ROLE_CACHE_TTL)
+    return role
 
 
 async def require_superadmin(role: str = Depends(get_current_role)):
@@ -93,8 +133,6 @@ async def require_superadmin(role: str = Depends(get_current_role)):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_startup_checks(exit_on_fatal=False)
-    idx = _build_file_index()
-    logger.warning(f"Song index built: {len(idx)} files found in {SONGS_DIR}")
     logger.info("fabPLAY MMR API ready on http://0.0.0.0:8001")
     yield
 
@@ -111,114 +149,26 @@ superadmin_router = APIRouter(dependencies=[Depends(require_superadmin)])
 # ─── Song file resolver ───────────────────────────────────────────────────────
 
 SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent / "songs")))
-SONGS_BASE_URL = os.getenv("SONGS_BASE_URL", "").rstrip("/")
-SONGS_MANIFEST = Path(__file__).parent.parent / "songs_manifest.json"
-_file_index: Optional[dict] = None
-
-
-def _build_blob_index(base_url: str) -> dict:
-    """
-    Build {filename -> blob relative path} by listing the Azure Blob container.
-    This lets us resolve DB filenames to nested blob keys like:
-      "folder/subfolder/track.mp3"
-    """
-    idx: dict[str, str] = {}
-    marker = ""
-    # Azure list API (public container): ?restype=container&comp=list
-    while True:
-        list_url = f"{base_url}/songs?restype=container&comp=list"
-        if marker:
-            list_url += f"&marker={quote(marker, safe='')}"
-        resp = httpx.get(list_url, timeout=20.0)
-        if resp.status_code != 200:
-            logger.warning("Blob list failed (%s): %s", resp.status_code, list_url)
-            break
-
-        try:
-            root = ET.fromstring(resp.text)
-        except ET.ParseError:
-            logger.warning("Blob list XML parse failed")
-            break
-
-        blobs = root.find("Blobs")
-        if blobs is not None:
-            for blob in blobs.findall("Blob"):
-                name_el = blob.find("Name")
-                if name_el is None or not name_el.text:
-                    continue
-                rel = name_el.text.strip().replace("\\", "/")
-                fname = rel.split("/")[-1]
-                if fname.lower().endswith(".mp3"):
-                    idx[fname] = rel
-
-        next_marker_el = root.find("NextMarker")
-        marker = (next_marker_el.text or "").strip() if next_marker_el is not None else ""
-        if not marker:
-            break
-    return idx
-
-
-def _build_file_index() -> dict:
-    global _file_index
-    if _file_index is not None:
-        return _file_index
-    _file_index = {}
-    if SONGS_DIR.exists():
-        for f in SONGS_DIR.rglob("*.mp3"):
-            rel = f.relative_to(SONGS_DIR)
-            _file_index[f.name] = str(rel)
-    elif SONGS_MANIFEST.exists():
-        import json as _json
-        _file_index = _json.loads(SONGS_MANIFEST.read_text(encoding="utf-8"))
-        logger.warning(f"Loaded songs manifest: {len(_file_index)} entries from {SONGS_MANIFEST}")
-    elif SONGS_BASE_URL and "blob.core.windows.net" in SONGS_BASE_URL:
-        _file_index = _build_blob_index(SONGS_BASE_URL)
-        logger.warning(f"Built blob songs index: {len(_file_index)} entries from {SONGS_BASE_URL}/songs")
-    return _file_index
-
-
-def _norm(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s)
-    s = s.replace("\u2019", "'").replace("\u2018", "'")
-    return " ".join(s.split()).lower()
-
-
-def _songs_url(rel_path: str) -> str:
-    path = rel_path.replace("\\", "/")
-    encoded = "/".join(quote(seg, safe="") for seg in path.split("/"))
-    if SONGS_BASE_URL:
-        return f"{SONGS_BASE_URL}/songs/{encoded}"
-    return "/songs/" + encoded
 
 
 def _resolve_track_src(track: dict) -> str:
-    idx = _build_file_index()
-    fname = track.get("filename") or ""
-    if fname and fname in idx:
-        return _songs_url(idx[fname])
-    # Fallback for VM streaming mode when no local songs index/manifest exists.
-    # Assumes files are directly addressable by filename under SONGS_BASE_URL/songs/.
-    if fname and SONGS_BASE_URL and not idx:
-        return _songs_url(fname)
-    if fname:
-        fn = _norm(fname)
-        for name, path in idx.items():
-            if _norm(name) == fn:
-                return _songs_url(path)
-    title = (track.get("title") or track.get("name") or "").strip().rstrip("_").strip()
-    for name, path in idx.items():
-        if name.startswith(title):
-            return _songs_url(path)
-    tn = _norm(title)
-    for name, path in idx.items():
-        if _norm(name).startswith(tn):
-            return _songs_url(path)
-    display = title.split(" _ ")[0].split("_")[0].strip().lower()
-    if len(display) > 4:
-        for name, path in idx.items():
-            if name.lower().startswith(display):
-                return _songs_url(path)
-    return ""
+    """
+    Resolve a playable source URL.
+    - Keep absolute URLs as-is.
+    - For relative DB paths, prefer SONGS_BASE_URL when configured.
+    - Fall back to backend /songs proxy route.
+    """
+    raw = str(track.get("url") or track.get("src") or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("http://", "https://", "data:", "blob:")):
+        return raw
+    rel = raw.lstrip("/")
+    if SONGS_BASE_URL:
+        return f"{SONGS_BASE_URL}/{rel}"
+    if rel.startswith("songs/"):
+        rel = rel[len("songs/"):]
+    return f"/songs/{rel}"
 
 
 # ─── Persistence (JSON files) ─────────────────────────────────────────────────
@@ -338,8 +288,8 @@ def _fmt_track(t: dict) -> dict:
         "title":            t.get("title", ""),
         "artist":           t.get("artist", ""),
         "genre":            t.get("genre", ""),
-        "filename":         t.get("filename", ""),
-        "src":              _resolve_track_src(t),
+        "url":              t.get("url", ""),
+        "src":              t.get("url") or t.get("src", ""),
         "bpm":              round(float(t.get("tempo_bpm", 120))),
         "bfs":              round(float(t.get("relevance_score", t.get("mmr_score", 0.5))), 3),
         "mmr_score":        round(float(t.get("mmr_score",  0.5)), 3),
@@ -582,7 +532,7 @@ def _bg_soundboard(brand_id: str, tid: str):
 
 # ─── Background: Playlist generation (MMR) ───────────────────────────────────
 
-def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None):
+def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None):
     try:
         brands = get_brands()
         brand  = brands.get(brand_id)
@@ -646,6 +596,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                 brand_profile   = bp,
                 day_part_params = dp,
                 inputs          = inputs,
+                used_song_ids   = used_song_ids,
             )
 
             if not candidates:
@@ -731,8 +682,25 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         playlists[brand_id] = playlist_result
         save_playlists(playlists)
 
-        # ── Sync generated songs to Supabase user_playlist_songs ──────────────
         user_id = brand.get("user_id")
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # ── Persist full playlist JSON to Supabase (survives backend restarts) ─
+        try:
+            get_supabase().table("brand_playlists").upsert(
+                {
+                    "brand_id":     brand_id,
+                    "user_id":      user_id,
+                    "playlist_json": playlist_result,
+                    "updated_at":   now_iso,
+                },
+                on_conflict="brand_id",
+            ).execute()
+            logger.info("Playlist saved to brand_playlists (brand=%s)", brand_id)
+        except Exception as e:
+            logger.warning("Could not save playlist to brand_playlists: %s", e)
+
+        # ── Sync flat song list to user_playlist_songs ─────────────────────────
         if user_id:
             unique_songs: dict[str, str] = {}
             for dp_result in assembled:
@@ -742,7 +710,6 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                         unique_songs[sid] = track.get("title", "")
             if unique_songs:
                 try:
-                    now_iso = datetime.now(timezone.utc).isoformat()
                     get_supabase().table("user_playlist_songs") \
                         .delete().eq("user_id", user_id).eq("brand_id", brand_id).execute()
                     rows = [
@@ -757,9 +724,16 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                     logger.warning("Could not sync playlist songs to Supabase: %s", e)
 
         brands = get_brands()
-        brands[brand_id]["playlist_count"] = brands[brand_id].get("playlist_count", 0) + 1
-        brands[brand_id]["last_updated"]   = datetime.now(timezone.utc).isoformat()
-        brands[brand_id]["status"]         = "active"
+        is_first = brands[brand_id].get("playlist_count", 0) == 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        brands[brand_id]["playlist_count"]    = brands[brand_id].get("playlist_count", 0) + 1
+        brands[brand_id]["last_updated"]      = now_iso
+        brands[brand_id]["last_generated_at"] = now_iso
+        brands[brand_id]["status"]            = "active"
+        if playlist_name and is_first:
+            brands[brand_id]["playlist_name"] = playlist_name.strip()
+        elif not brands[brand_id].get("playlist_name"):
+            brands[brand_id]["playlist_name"] = brands[brand_id].get("brand_name", "")
         save_brands(brands)
 
         log_activity("Playlists generated (MMR)", brand["brand_name"])
@@ -856,7 +830,9 @@ async def create_brand(req: Request, user: dict = Depends(get_current_user)):
         "has_brand_guidelines": data.get("has_brand_guidelines", False),
         "status":               "setup",
         "playlist_count":       0,
+        "playlist_name":        data.get("brand_name", ""),
         "last_updated":         now,
+        "last_generated_at":    None,
         "brand_profile":        None,
         "sound_board_result":   None,
     }
@@ -880,6 +856,23 @@ def delete_brand(brand_id: str, user: dict = Depends(get_current_user)):
     playlists.pop(brand_id, None)
     save_playlists(playlists)
     log_activity("Brand deleted", name)
+    return {"ok": True}
+
+
+@protected_router.patch("/api/brands/{brand_id}/playlist-name")
+async def rename_playlist(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
+    brands = get_brands()
+    if brand_id not in brands:
+        raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
+    data = await req.json()
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    brands[brand_id]["playlist_name"] = name
+    brands[brand_id]["last_updated"]  = datetime.now(timezone.utc).isoformat()
+    save_brands(brands)
     return {"ok": True}
 
 
@@ -952,7 +945,7 @@ You are a brand strategist. Based on this brand asset analysis, return ONLY a va
   "avoid_genres": ["genre1", "genre2"],
   "music_notes": "Brief note about music direction (1-2 sentences)"
 }
-Only include genres from this list: Pop, House, Chillout, Indie, Lounge, Afro Pop, Dance, Rock, Europop, Ambient, Orchestral, Electronic, Electropop, Deep House, Jazz, Tropical House, Folk, Blues, Bollywood, Soul, R&B, Hip Hop, Funk, Indie Rock, Indie Pop"""
+Only include genres from this list: Blues, Classical, Country, Electronic, Hip Hop, Jazz, Latin, Other, Pop, Reggae, Rock, Soul/Funk"""
             resp2 = cc.chat.completions.create(
                 model=dep,
                 max_completion_tokens=300,
@@ -1052,6 +1045,18 @@ async def upload_assets(brand_id: str, files: list[UploadFile] = File(...)):
 
 # ─── Routes: Catalog ──────────────────────────────────────────────────────────
 
+@protected_router.get("/api/catalog/genres")
+def catalog_genres():
+    """Return distinct genres present in the songs catalog, sorted alphabetically."""
+    try:
+        from backend.db import fetch_all_songs as _fetch
+        songs = _fetch()
+        genres = sorted({s.get("genre") for s in songs if s.get("genre")})
+        return {"genres": genres}
+    except Exception as e:
+        return {"genres": [], "error": str(e)}
+
+
 @protected_router.get("/api/catalog/stats")
 def catalog_stats():
     try:
@@ -1065,8 +1070,8 @@ def catalog_stats():
 def catalog_songs():
     try:
         r = get_supabase().table("songs").select(
-            "id,title,artist,genre,tempo_bpm,energy,valence,"
-            "danceability,acousticness,instrumentalness,loudness,speechness"
+            "id,title,artist,genre,url,tempo_bpm,energy,valence,"
+            "danceability,acousticness,instrumentalness,loudness,speechness,duration_seconds"
         ).limit(50).execute()
         return {"songs": [
             {
@@ -1074,6 +1079,7 @@ def catalog_songs():
                 "title":            s.get("title", ""),
                 "artist":           s.get("artist", ""),
                 "genre":            s.get("genre", ""),
+                "url":              s.get("url", ""),
                 "tempo_bpm":        s.get("tempo_bpm", 120),
                 "energy":           s.get("energy", 0.5),
                 "valence":          s.get("valence", 0.5),
@@ -1082,6 +1088,7 @@ def catalog_songs():
                 "instrumentalness": s.get("instrumentalness", 0.3),
                 "loudness":         s.get("loudness", -8.0),
                 "speechiness":      s.get("speechness", 0.1),
+                "duration_seconds": s.get("duration_seconds", 210),
             }
             for s in (r.data or [])
         ]}
@@ -1148,6 +1155,7 @@ class GenreOverrides(BaseModel):
 
 class GenerateRequest(BaseModel):
     genre_overrides: GenreOverrides = GenreOverrides()
+    playlist_name: Optional[str] = None
 
 @protected_router.post("/api/generate/{brand_id}")
 def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest()):
@@ -1155,7 +1163,7 @@ def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest()):
         raise HTTPException(404, "Brand not found")
     tid = new_task()
     logger.warning("generate called: brand=%s genre_overrides=%s", brand_id, req.genre_overrides.model_dump())
-    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump()), daemon=True).start()
+    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump(), req.playlist_name), daemon=True).start()
     return {"task_id": tid}
 
 
@@ -1168,10 +1176,12 @@ def generation_status(task_id: str):
 
 
 @protected_router.put("/api/brands/{brand_id}/soundboard")
-async def update_soundboard_targets(brand_id: str, req: Request):
+async def update_soundboard_targets(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
     brands = get_brands()
     if brand_id not in brands:
         raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
     data = await req.json()
     targets: dict = data.get("targets", {})
     if not targets:
@@ -1190,10 +1200,12 @@ async def update_soundboard_targets(brand_id: str, req: Request):
 
 
 @protected_router.put("/api/brands/{brand_id}/dayparts")
-async def update_dayparts(brand_id: str, req: Request):
+async def update_dayparts(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
     brands = get_brands()
     if brand_id not in brands:
         raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
     data = await req.json()
     incoming = data.get("day_parts", [])
     sb_result = brands[brand_id].get("sound_board_result")
@@ -1218,10 +1230,12 @@ async def update_dayparts(brand_id: str, req: Request):
 
 
 @protected_router.put("/api/brands/{brand_id}/profile")
-async def update_brand_profile(brand_id: str, req: Request):
+async def update_brand_profile(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
     brands = get_brands()
     if brand_id not in brands:
         raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
     data = await req.json()
     PROFILE_KEYS = ["sincerity", "excitement", "competence", "sophistication", "ruggedness"]
     updates = {k: float(v) for k, v in data.items() if k in PROFILE_KEYS and v is not None}
@@ -1243,9 +1257,181 @@ async def update_brand_profile(brand_id: str, req: Request):
     }
 
 
+@protected_router.put("/api/brands/{brand_id}/genres")
+async def update_genres(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
+    brands = get_brands()
+    if brand_id not in brands:
+        raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
+    data = await req.json()
+    include_genres = data.get("include_genres", [])
+    exclude_genres = data.get("exclude_genres", [])
+    brands[brand_id]["include_genres"] = include_genres
+    brands[brand_id]["exclude_genres"] = exclude_genres
+    brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()
+    save_brands(brands)
+    return {"ok": True}
+
+
+def _recalc_daypart_stats(dp: dict) -> dict:
+    tracks = dp.get("tracks", [])
+    dp["track_count"] = len(tracks)
+    dp["total_duration_seconds"] = sum(t.get("duration_seconds", 0) for t in tracks)
+    if tracks:
+        dp["avg_bfs"] = round(sum(t.get("bfs", 0) for t in tracks) / len(tracks), 3)
+        dp["avg_mmr"] = round(sum(t.get("mmr_score", 0) for t in tracks) / len(tracks), 3)
+    else:
+        dp["avg_bfs"] = 0.0
+        dp["avg_mmr"] = 0.0
+    return dp
+
+
+def _sync_playlist_songs(brand_id: str, user_id: str, day_parts: list) -> None:
+    unique_songs: dict[str, str] = {}
+    for dp_r in day_parts:
+        for track in dp_r.get("tracks", []):
+            sid = track.get("song_id")
+            if sid and sid not in unique_songs:
+                unique_songs[sid] = track.get("title", "")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    get_supabase().table("user_playlist_songs") \
+        .delete().eq("user_id", user_id).eq("brand_id", brand_id).execute()
+    if unique_songs:
+        rows = [{"user_id": user_id, "brand_id": brand_id,
+                 "song_id": sid, "song_name": name, "generated_at": now_iso}
+                for sid, name in unique_songs.items()]
+        get_supabase().table("user_playlist_songs").insert(rows).execute()
+
+
+@protected_router.delete("/api/playlists/{brand_id}/tracks")
+async def remove_tracks(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
+    brands = get_brands()
+    if brand_id not in brands:
+        raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
+    playlists = get_playlists()
+    if brand_id not in playlists:
+        raise HTTPException(404, "No playlist found")
+    data = await req.json()
+    dp_idx: int = data.get("day_part_index", -1)
+    song_ids: list = data.get("song_ids", [])
+    if not song_ids:
+        raise HTTPException(400, "No song_ids provided")
+    pl = playlists[brand_id]
+    day_parts = pl.get("day_parts", [])
+    if dp_idx < 0 or dp_idx >= len(day_parts):
+        raise HTTPException(400, "Invalid day_part_index")
+    dp = day_parts[dp_idx]
+    remove_set = set(song_ids)
+    dp["tracks"] = [t for t in dp.get("tracks", []) if t.get("song_id") not in remove_set]
+    _recalc_daypart_stats(dp)
+    save_playlists(playlists)
+    try:
+        _sync_playlist_songs(brand_id, user["id"], day_parts)
+    except Exception as e:
+        logger.warning("Supabase sync failed after track removal: %s", e)
+    try:
+        get_supabase().table("brand_playlists").upsert(
+            {"brand_id": brand_id, "user_id": user["id"],
+             "playlist_json": pl, "updated_at": datetime.now(timezone.utc).isoformat()},
+            on_conflict="brand_id",
+        ).execute()
+    except Exception as e:
+        logger.warning("brand_playlists upsert failed after track removal: %s", e)
+    # Re-resolve src for returned tracks
+    for t in dp.get("tracks", []):
+        t["src"] = _resolve_track_src(t)
+    return {"ok": True, "day_part": dp}
+
+
+@protected_router.post("/api/playlists/{brand_id}/tracks/replace")
+async def replace_track(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
+    brands = get_brands()
+    if brand_id not in brands:
+        raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
+    playlists = get_playlists()
+    if brand_id not in playlists:
+        raise HTTPException(404, "No playlist found")
+    data = await req.json()
+    dp_idx: int = data.get("day_part_index", -1)
+    song_id: str = data.get("song_id", "")
+    if not song_id:
+        raise HTTPException(400, "song_id required")
+    pl = playlists[brand_id]
+    day_parts = pl.get("day_parts", [])
+    if dp_idx < 0 or dp_idx >= len(day_parts):
+        raise HTTPException(400, "Invalid day_part_index")
+    dp = day_parts[dp_idx]
+    tracks = dp.get("tracks", [])
+    track_idx = next((i for i, t in enumerate(tracks) if t.get("song_id") == song_id), None)
+    if track_idx is None:
+        raise HTTPException(404, "Track not found in day-part")
+    original = tracks[track_idx]
+    # Collect all song_ids already in the whole playlist
+    used_ids = {t.get("song_id") for dp_r in day_parts for t in dp_r.get("tracks", [])}
+    # Fetch catalog and filter
+    from backend.db import fetch_all_songs as _fetch_all
+    all_songs = _fetch_all()
+    inputs = _pipeline_inputs(brands[brand_id])
+    filtered = apply_hard_filters(all_songs, dp, inputs)
+    if not filtered:
+        filtered = apply_exclusion_filters_only(all_songs, inputs)
+    candidates = [s for s in filtered if s.get("song_id", s.get("id", "")) not in used_ids]
+    if not candidates:
+        raise HTTPException(404, "No replacement candidates available")
+    # Score: 60% fit to day-part targets, 40% similarity to replaced song
+    def _score(c: dict) -> float:
+        return 0.6 * compute_relevance(c, dp) + 0.4 * compute_track_sim(c, original)
+    best = max(candidates, key=_score)
+    best.setdefault("song_id", best.get("id", ""))
+    best["relevance_score"] = _score(best)
+    replacement = _fmt_track(best)
+    tracks[track_idx] = replacement
+    dp["tracks"] = tracks
+    _recalc_daypart_stats(dp)
+    save_playlists(playlists)
+    try:
+        _sync_playlist_songs(brand_id, user["id"], day_parts)
+    except Exception as e:
+        logger.warning("Supabase sync failed after track replace: %s", e)
+    try:
+        get_supabase().table("brand_playlists").upsert(
+            {"brand_id": brand_id, "user_id": user["id"],
+             "playlist_json": pl, "updated_at": datetime.now(timezone.utc).isoformat()},
+            on_conflict="brand_id",
+        ).execute()
+    except Exception as e:
+        logger.warning("brand_playlists upsert failed after track replace: %s", e)
+    # Re-resolve src for returned tracks
+    for t in dp.get("tracks", []):
+        t["src"] = _resolve_track_src(t)
+    return {"ok": True, "replacement": replacement, "day_part": dp}
+
+
 @protected_router.get("/api/playlists/{brand_id}")
 def get_playlist(brand_id: str):
     pl = get_playlists().get(brand_id)
+    if not pl:
+        # Fall back to Supabase (e.g. after a backend restart)
+        try:
+            r = get_supabase().table("brand_playlists") \
+                .select("playlist_json") \
+                .eq("brand_id", brand_id) \
+                .maybe_single() \
+                .execute()
+            if r and r.data:
+                raw = r.data["playlist_json"]
+                pl = json.loads(raw) if isinstance(raw, str) else raw
+                # Cache locally so subsequent reads are instant
+                playlists = get_playlists()
+                playlists[brand_id] = pl
+                save_playlists(playlists)
+        except Exception as e:
+            logger.warning("Supabase playlist fallback failed for %s: %s", brand_id, e)
     if not pl:
         raise HTTPException(404, "No playlist found for this brand. Run generation first.")
     for dp in pl.get("day_parts", []):
@@ -1256,16 +1442,13 @@ def get_playlist(brand_id: str):
 
 @superadmin_router.get("/api/debug/songs")
 def debug_songs():
-    idx = _build_file_index()
-    sample = []
-    for name, path in list(idx.items())[:3]:
-        sample.append({"filename": name, "src": _songs_url(path)})
-    return {
-        "songs_dir":        str(SONGS_DIR),
-        "songs_dir_exists": SONGS_DIR.exists(),
-        "indexed_files":    len(idx),
-        "sample":           sample,
-    }
+    try:
+        r = get_supabase().table("songs").select("id,title,artist,url").limit(3).execute()
+        sample = [{"id": s["id"], "title": s.get("title", ""), "url": s.get("url", "")} for s in (r.data or [])]
+        total = get_supabase().table("songs").select("id", count="exact").execute().count or 0
+    except Exception as e:
+        return {"error": str(e)}
+    return {"total_songs": total, "sample": sample}
 
 
 @app.get("/songs/{path:path}")
@@ -1292,6 +1475,20 @@ async def auth_me(
     role: str  = Depends(get_current_role),
 ):
     return {"id": user["id"], "email": user.get("email", ""), "role": role}
+
+
+@protected_router.get("/api/init")
+def app_init(
+    user: dict = Depends(get_current_user),
+    role: str  = Depends(get_current_role),
+):
+    """Single bootstrap call: returns user info + brands in one round trip."""
+    uid = user["id"]
+    brands = [b for b in get_brands().values() if b.get("user_id") == uid]
+    return {
+        "user":   {"id": uid, "email": user.get("email", ""), "role": role},
+        "brands": brands,
+    }
 
 
 # ─── Routes: IAM (superadmin only) ───────────────────────────────────────────
