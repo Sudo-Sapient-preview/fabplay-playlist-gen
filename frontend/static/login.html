@@ -287,24 +287,19 @@
     this.error = '';
     this.success = '';
     try {
-      const cfg = await this.getConfig();
-      const r = await fetch(cfg.supabase_url + '/auth/v1/signup', {
+      const r = await fetch('/api/auth/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': cfg.supabase_anon_key },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: this.email,
           password: this.password,
-          data: { full_name: this.fullName, phone: this.phone.trim() }
+          full_name: this.fullName,
+          phone: this.phone.trim()
         })
       });
       const data = await r.json();
       if (!r.ok) {
-        const msg = (data.error_description || data.msg || '').toLowerCase();
-        if (msg.includes('already registered') || data.error_code === 'email_exists') {
-          this.error = 'This email is already registered. Please sign in.';
-        } else {
-          this.error = data.error_description || data.msg || 'Sign up failed. Please try again.';
-        }
+        this.error = data.error || 'Sign up failed. Please try again.';
         return;
       }
       localStorage.setItem('fabplay_token',  data.access_token);

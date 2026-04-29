@@ -99,7 +99,7 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
         },
     ],
 
-    "fashion_footwear": [
+    "fashion": [
         {
             "name": "Morning",
             "start_time": "10:00",
@@ -471,26 +471,6 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
         },
     ],
 
-    "footwear": [
-        {
-            "name": "Morning",
-            "start_time": "10:00",
-            "end_time": "13:00",
-            "character": "Fresh, on-trend, moderate energy — setting the tone",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "17:00",
-            "character": "Peak shopping, upbeat pop/dance — drive dwell time",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Energetic, trendy — after-work shoppers",
-        },
-    ],
 }
 
 

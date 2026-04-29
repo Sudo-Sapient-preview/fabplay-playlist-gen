@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, APIRouter
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AzureOpenAI
@@ -938,14 +938,20 @@ async def analyze_assets_preview(files: list[UploadFile] = File(...)):
 
     if asset_analysis:
         try:
-            MUSIC_EXTRACT_PROMPT = """\
+            from backend.db import fetch_all_songs as _fetch_songs
+            _db_genres = sorted({s.get("genre") for s in _fetch_songs() if s.get("genre")})
+            _genre_list = ", ".join(
+                {"hip_hop": "Hip Hop", "soul_funk": "Soul/Funk"}.get(g, g.replace("_", " ").title())
+                for g in _db_genres
+            )
+            MUSIC_EXTRACT_PROMPT = f"""\
 You are a brand strategist. Based on this brand asset analysis, return ONLY a valid JSON object:
-{
+{{
   "recommended_genres": ["genre1", "genre2", "genre3"],
   "avoid_genres": ["genre1", "genre2"],
   "music_notes": "Brief note about music direction (1-2 sentences)"
-}
-Only include genres from this list: Blues, Classical, Country, Electronic, Hip Hop, Jazz, Latin, Other, Pop, Reggae, Rock, Soul/Funk"""
+}}
+Only include genres from this list: {_genre_list}"""
             resp2 = cc.chat.completions.create(
                 model=dep,
                 max_completion_tokens=300,
@@ -1465,6 +1471,49 @@ def serve_song(path: str):
 async def public_config():
     """Returns browser-safe Supabase config for the login page."""
     return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_ANON_KEY}
+
+
+@public_router.post("/api/auth/signup")
+async def public_signup(request: Request):
+    """Create account via admin API (auto-confirms email) then return session tokens."""
+    import httpx
+    body = await request.json()
+    email    = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    metadata = {k: v for k, v in {
+        "full_name": body.get("full_name", ""),
+        "phone":     body.get("phone", ""),
+    }.items() if v}
+
+    if not email or not password:
+        return JSONResponse({"error": "Email and password are required."}, status_code=400)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # 1. Create user via admin API with email_confirm=True (skips confirmation email)
+        create_resp = await client.post(
+            f"{SUPABASE_URL}/auth/v1/admin/users",
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json"},
+            json={"email": email, "password": password,
+                  "email_confirm": True, "user_metadata": metadata},
+        )
+        if not create_resp.is_success:
+            data = create_resp.json()
+            msg  = data.get("error_description") or data.get("msg") or data.get("message") or "Sign up failed."
+            if "already registered" in msg.lower() or create_resp.status_code == 422:
+                msg = "This email is already registered. Please sign in."
+            return JSONResponse({"error": msg}, status_code=400)
+
+        # 2. Sign the new user in to get session tokens
+        signin_resp = await client.post(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            headers={"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+            json={"email": email, "password": password},
+        )
+        if not signin_resp.is_success:
+            return JSONResponse({"error": "Account created but sign-in failed. Please sign in manually."}, status_code=400)
+
+        return JSONResponse(signin_resp.json())
 
 
 # ─── Routes: Auth / Me ────────────────────────────────────────────────────────
