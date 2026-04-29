@@ -7,6 +7,8 @@ services:
       - .env
     ports:
       - "8001:8001"
+    volumes:
+      - fabplay_data:/app/data
 
   frontend:
     build:
@@ -18,3 +20,6 @@ services:
       - "8003:8003"
     depends_on:
       - backend
+
+volumes:
+  fabplay_data:

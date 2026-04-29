@@ -471,6 +471,33 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
         },
     ],
 
+    "footwear": [
+        {
+            "name": "Morning",
+            "start_time": "10:00",
+            "end_time": "13:00",
+            "character": "Energetic, on-trend, moderate tempo — opening hours, early browsers",
+        },
+        {
+            "name": "Afternoon",
+            "start_time": "13:00",
+            "end_time": "17:00",
+            "character": "Upbeat, rhythmic, peak dwell time — high footfall shopping hours",
+        },
+        {
+            "name": "Evening",
+            "start_time": "17:00",
+            "end_time": "20:00",
+            "character": "Energetic, youthful, trendy — after-work and evening shoppers",
+        },
+        {
+            "name": "Closing",
+            "start_time": "20:00",
+            "end_time": "22:00",
+            "character": "Mellowed, cool — wind-down, last purchases of the day",
+        },
+    ],
+
 }
 
 
