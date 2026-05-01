@@ -32,7 +32,7 @@ from brand_pipeline.brand_analysis import get_brand_profile
 from brand_pipeline.sound_board import get_sound_board, apply_segment_adjustments
 from pipeline.rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks, apply_hard_filters, apply_exclusion_filters_only
 from pipeline.mmr_scorer import mmr_select, compute_relevance, compute_track_sim
-from brand_pipeline.day_part_templates import get_template, get_day_part_hours, target_track_count
+from brand_pipeline.day_part_templates import DAY_PART_TEMPLATES, get_template, get_day_part_hours, target_track_count
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -510,7 +510,9 @@ def _bg_soundboard(brand_id: str, tid: str):
         bp.setdefault("price_positioning",    brand.get("customer_segment", "mid_range"))
 
         task_progress(tid, 55, "Generating sound board parameters...")
-        sb = get_sound_board(bp, brand.get("category", "cafe"), cc, dep)
+        raw_cat = brand.get("category") or "cafe"
+        cat = raw_cat if raw_cat in DAY_PART_TEMPLATES else "cafe"
+        sb = get_sound_board(bp, cat, cc, dep, music_notes=brand.get("music_notes", ""))
         sb = apply_segment_adjustments(sb, brand.get("customer_segment", "mid_range"))
 
         brands = get_brands()
@@ -565,7 +567,9 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             bp.setdefault("price_positioning",    brand.get("customer_segment", "mid_range"))
 
             task_progress(tid, 20, "Generating sound board...")
-            sb_result = get_sound_board(bp, brand.get("category", "cafe"), cc, dep)
+            raw_cat = brand.get("category") or "cafe"
+            cat = raw_cat if raw_cat in DAY_PART_TEMPLATES else "cafe"
+            sb_result = get_sound_board(bp, cat, cc, dep, music_notes=brand.get("music_notes", ""))
             sb_result = apply_segment_adjustments(sb_result, brand.get("customer_segment", "mid_range"))
 
             brands = get_brands()
@@ -805,6 +809,11 @@ def list_brands(user: dict = Depends(get_current_user)):
 @protected_router.post("/api/brands")
 async def create_brand(req: Request, user: dict = Depends(get_current_user)):
     data     = await req.json()
+    category = data.get("category", "")
+    if not category:
+        raise HTTPException(400, "Category is required.")
+    if category not in DAY_PART_TEMPLATES:
+        raise HTTPException(400, f"Invalid category '{category}'.")
     brand_id = str(uuid.uuid4())
     now      = datetime.now(timezone.utc).isoformat()
     brand = {
@@ -1228,6 +1237,20 @@ async def update_dayparts(brand_id: str, req: Request, user: dict = Depends(get_
             for k in TARGET_KEYS:
                 if k in upd:
                     existing[i][k] = upd[k]
+            # Re-center the hard filter window around the user-set target.
+            # Use ±0.20 for energy/valence and ±20 BPM for tempo so that extreme
+            # targets (e.g. energy=1.0 or BPM=180) still match enough songs from
+            # the catalog without triggering full filter bypass.
+            for base in ("energy", "valence"):
+                t_key, mn_key, mx_key = f"{base}_target", f"{base}_min", f"{base}_max"
+                if t_key in existing[i]:
+                    t = float(existing[i][t_key])
+                    existing[i][mn_key] = round(max(0.0, t - 0.20), 3)
+                    existing[i][mx_key] = round(min(1.0, t + 0.20), 3)
+            if "tempo_target" in existing[i]:
+                t = float(existing[i]["tempo_target"])
+                existing[i]["tempo_min"] = int(max(60.0, t - 20))
+                existing[i]["tempo_max"] = int(min(200.0, t + 20))
     sb_result["day_parts"] = existing
     brands[brand_id]["sound_board_result"] = sb_result
     brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()

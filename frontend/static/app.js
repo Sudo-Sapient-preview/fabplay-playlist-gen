@@ -669,25 +669,30 @@ return {
 
   updateTarget(p,valStr){
     const val=Number(valStr);
-    const applyNow=()=>{
-      const sb=this.curBrand?.sound_board_result;
-      if(sb){
-        if(!sb.sound_board)sb.sound_board={};
-        sb.sound_board[p.key+'_target']=val;
-        // Only update active day_part during drag — full sync happens on applyChanges
-        const activeDp=sb.day_parts?.[this.activeDp];
-        if(activeDp)activeDp[p.key+'_target']=val;
-      }
-      p.target=val;
-      p.pct=p.key==='tempo'?((val-60)/120)*100:val*100;
-      p.display=p.key==='tempo'?Math.round(val)+' BPM':parseFloat(val).toFixed(2);
-      this.sbAcousticDirty=true;
+    // Always record the latest value per key so the rAF applies the most recent
+    // slider position (not the first event in the frame window, which can be stale
+    // if the user dragged quickly).
+    if(!this._pendingVals)this._pendingVals={};
+    this._pendingVals[p.key]={p,val};
+    if(this._sliderRaf)return;
+    this._sliderRaf=requestAnimationFrame(()=>{
+      const pending=Object.values(this._pendingVals||{});
+      this._pendingVals={};
       this._sliderRaf=null;
-    };
-    if(this._sliderRaf){
-      return;
-    }
-    this._sliderRaf=requestAnimationFrame(applyNow);
+      const sb=this.curBrand?.sound_board_result;
+      const activeDp=sb?.day_parts?.[this.activeDp];
+      pending.forEach(({p:_p,val:_val})=>{
+        if(sb){
+          if(!sb.sound_board)sb.sound_board={};
+          sb.sound_board[_p.key+'_target']=_val;
+          if(activeDp)activeDp[_p.key+'_target']=_val;
+        }
+        _p.target=_val;
+        _p.pct=_p.key==='tempo'?((_val-60)/120)*100:_val*100;
+        _p.display=_p.key==='tempo'?Math.round(_val)+' BPM':parseFloat(_val).toFixed(2);
+      });
+      this.sbAcousticDirty=true;
+    });
   },
 
   _refreshTimeline(){
