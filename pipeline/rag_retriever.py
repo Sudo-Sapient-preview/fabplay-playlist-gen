@@ -143,11 +143,9 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 
 # ─── Main retriever ───────────────────────────────────────────────────────────
 
-MIN_CANDIDATES = 5
-# Large enough that cross-day-part dedup still leaves plenty of fresh candidates
-# across a 5-slot day. Each slot may use 55-75 tracks; 5 × 75 = 375, so 600 gives
-# comfortable headroom before the best-by-relevance cap kicks in.
-MAX_CANDIDATES = 600
+# Top N songs passed to MMR per day-part (sorted by relevance).
+# 5 day-parts × 75 tracks = 375 max needed; 800 gives comfortable headroom.
+MAX_CANDIDATES = 800
 
 
 def retrieve_candidates(
@@ -155,64 +153,47 @@ def retrieve_candidates(
     day_part_params: dict,
     inputs:          dict,
     used_song_ids:   set | None = None,
-) -> tuple[list[dict], dict]:
+) -> tuple[list[dict], list[dict], dict]:
     """
     Retrieval for one day-part.
-    Fetches the full song catalog and applies hard filters in Python.
 
-    used_song_ids: IDs already selected in earlier day-parts.  Fresh tracks are
-    ranked ahead of already-used ones so the MAX_CANDIDATES cap preferentially
-    returns songs the playlist hasn't seen yet.
+    Considers the full song catalog — only artist/genre exclusions and explicit
+    proxy are applied as hard filters. Energy/tempo/valence bounds are NOT used
+    here; MMR relevance scoring already ranks tracks by audio-feature closeness
+    to the day-part target, so hard bounds are redundant and only shrink the pool.
 
     Returns:
-        (filtered_candidates, stats_dict)
-        stats_dict: {'filtered_count': int, 'skipped': bool}
+        (candidates, all_playable, stats_dict)
+        candidates   — top MAX_CANDIDATES by relevance, fresh tracks first
+        all_playable — full exclusion-filtered+playable catalog (spillover source)
+        stats_dict   — {'filtered_count': int, 'skipped': bool}
     """
-    dp_name = day_part_params.get("name", "")
-
     # 1. Fetch full catalog
     all_songs = fetch_all_songs()
     for s in all_songs:
         if "song_id" not in s:
             s["song_id"] = s.get("id")
 
-    # 2. Hard filters (strict)
-    filtered = _apply_hard_filters(all_songs, day_part_params, inputs, relax=0.0)
+    # 2. Only apply exclusion filters (artists, genres, explicit) + playable check.
+    all_playable = [
+        s for s in _apply_exclusion_filters_only(all_songs, inputs)
+        if _has_playable_audio(s)
+    ]
 
-    # 3. Relax bounds if too few candidates
-    if len(filtered) < MIN_CANDIDATES:
-        logger.warning(
-            "Only %d candidates after hard filters for '%s'. Relaxing filters (±0.15)...",
-            len(filtered), dp_name,
-        )
-        filtered = _apply_hard_filters(all_songs, day_part_params, inputs, relax=0.15)
+    if not all_playable:
+        return [], [], {"filtered_count": 0, "skipped": True}
 
-    # 4. Drop audio-feature bounds entirely if still too few
-    if len(filtered) < MIN_CANDIDATES:
-        logger.warning(
-            "Still only %d candidates for '%s'. Dropping audio-feature bounds, keeping exclusions only.",
-            len(filtered), dp_name,
-        )
-        filtered = _apply_exclusion_filters_only(all_songs, inputs)
+    # 3. Sort by relevance to this day-part; put fresh (unused) tracks first so
+    #    the MAX_CANDIDATES window is dominated by songs not yet in earlier day-parts.
+    all_playable.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
+    if used_song_ids:
+        fresh = [t for t in all_playable if t.get("song_id") not in used_song_ids]
+        stale = [t for t in all_playable if t.get("song_id") in used_song_ids]
+        candidates = (fresh + stale)[:MAX_CANDIDATES]
+    else:
+        candidates = all_playable[:MAX_CANDIDATES]
 
-    # Drop songs with no URL or zero duration — they'd be unplayable or stall duration targets.
-    filtered = [s for s in filtered if _has_playable_audio(s)]
-
-    if not filtered:
-        return [], {"filtered_count": 0, "skipped": True}
-
-    # Cap pool size before MMR — sort by relevance but put fresh tracks first so
-    # the MAX_CANDIDATES window is dominated by songs not yet used in earlier parts.
-    if len(filtered) > MAX_CANDIDATES:
-        filtered.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
-        if used_song_ids:
-            fresh = [t for t in filtered if t.get("song_id") not in used_song_ids]
-            stale = [t for t in filtered if t.get("song_id") in used_song_ids]
-            filtered = (fresh + stale)[:MAX_CANDIDATES]
-        else:
-            filtered = filtered[:MAX_CANDIDATES]
-
-    return filtered, {"filtered_count": len(filtered), "skipped": False}
+    return candidates, all_playable, {"filtered_count": len(candidates), "skipped": False}
 
 
 def fetch_must_include_tracks(

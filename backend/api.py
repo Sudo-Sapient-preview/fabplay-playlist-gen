@@ -596,7 +596,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             pct = 30 + int((idx / n) * 65)
             task_progress(tid, pct, f"Running MMR for {dp_name}...")
 
-            candidates, stats = retrieve_candidates(
+            candidates, all_playable, stats = retrieve_candidates(
                 brand_profile   = bp,
                 day_part_params = dp,
                 inputs          = inputs,
@@ -641,6 +641,15 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             hours          = get_day_part_hours(dp)
             target_seconds = hours * 3600
 
+            # Spillover: songs ranked beyond MAX_CANDIDATES — already exclusion-filtered.
+            # Used to fill duration if the top candidates are exhausted.
+            candidate_ids = {t.get("song_id") for t in candidates}
+            spillover = [
+                t for t in all_playable
+                if t.get("song_id") not in candidate_ids
+                and t.get("song_id") not in used_song_ids
+            ]
+
             playlist = mmr_select(
                 candidates     = candidates,
                 must_include   = must_inc,
@@ -648,6 +657,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                 target_count   = target_n,
                 target_seconds = target_seconds,
                 lam            = MMR_LAMBDA,
+                spillover      = spillover,
             )
 
             # Record which songs were used so later day-parts skip them

@@ -4,6 +4,8 @@ db.py — Supabase client, startup checks, and data helpers for fabPLAY v2.0
 
 import os
 import sys
+import json
+from pathlib import Path
 from supabase import create_client, Client
 from typing import Optional
 from dotenv import load_dotenv
@@ -11,6 +13,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _supabase: Optional[Client] = None
+
+# Load hidden song IDs
+_HIDDEN_SONGS_FILE = Path(__file__).parent / "hidden_songs.json"
+try:
+    _HIDDEN_IDS: set[str] = set(json.loads(_HIDDEN_SONGS_FILE.read_text()).get("hidden_ids", []))
+except Exception:
+    _HIDDEN_IDS: set[str] = set()
+
+# Genres excluded from all playlists regardless of brand settings
+_EXCLUDED_GENRES: set[str] = {"christian devotional"}
 
 
 def get_supabase() -> Client:
@@ -125,6 +137,11 @@ def fetch_all_songs() -> list[dict]:
     if _song_cache and (time.time() - _song_cache_ts) < _SONG_CACHE_TTL:
         return list(_song_cache)
     rows = _normalize(_paginate(get_supabase().table("songs").select(_SONG_COLS)))
+    rows = [
+        s for s in rows
+        if str(s.get("id")) not in _HIDDEN_IDS
+        and (s.get("genre") or "").lower() not in _EXCLUDED_GENRES
+    ]
     _song_cache = rows
     _song_cache_ts = time.time()
     return list(rows)
@@ -147,7 +164,12 @@ def fetch_songs_filtered(
         .gte("valence",    valence_min)
         .lte("valence",    valence_max)
     )
-    return _paginate(q)
+    rows = _paginate(q)
+    return [
+        s for s in rows
+        if str(s.get("id")) not in _HIDDEN_IDS
+        and (s.get("genre") or "").lower() not in _EXCLUDED_GENRES
+    ]
 
 
 def fetch_songs_not_yet_embedded() -> list[dict]:
@@ -222,12 +244,18 @@ def fetch_songs_by_artist(artist_name: str) -> list[dict]:
 
 
 def fetch_songs_by_genre(genre_name: str) -> list[dict]:
-    normalized = genre_name.lower().replace(' ', '_').replace('/', '_').replace('-', '_')
+    # ilike is case-insensitive; keep spaces so DB values like "Christian Devotional" match
+    query_str = genre_name.lower()
     result = (
         get_supabase()
         .table("songs")
         .select(_SONG_COLS)
-        .ilike("genre", f"%{normalized}%")
+        .ilike("genre", f"%{query_str}%")
         .execute()
     )
-    return _normalize(result.data or [])
+    rows = _normalize(result.data or [])
+    return [
+        s for s in rows
+        if str(s.get("id")) not in _HIDDEN_IDS
+        and (s.get("genre") or "").lower() not in _EXCLUDED_GENRES
+    ]

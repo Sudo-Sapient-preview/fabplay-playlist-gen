@@ -82,8 +82,8 @@ The target should ideally be near the centre of the min/max range.
 """
 
 
-def _build_user_prompt(brand_profile: dict, category: str) -> str:
-    templates = DAY_PART_TEMPLATES.get(category, [])
+def _build_user_prompt(brand_profile: dict, category: str, music_notes: str = "") -> str:
+    templates = DAY_PART_TEMPLATES.get(category) or DAY_PART_TEMPLATES["cafe"]
     template_str = json.dumps(templates, indent=2)
 
     # Strip all semantic/text fields — only pass numeric personality scores and
@@ -100,13 +100,21 @@ def _build_user_prompt(brand_profile: dict, category: str) -> str:
         "music_tempo_baseline":  brand_profile.get("music_tempo_baseline",  110),
     }
 
+    notes_block = (
+        f"\nAdditional Music Instructions (apply these to per-day-part targets):\n{music_notes}\n"
+        if music_notes and music_notes.strip()
+        else ""
+    )
+
     return (
         f"Brand Personality Scores:\n{json.dumps(numeric_profile, indent=2)}\n\n"
         f"Business Category: {category}\n\n"
-        f"Day-Part Templates for this category:\n{template_str}\n\n"
+        f"Day-Part Templates for this category:\n{template_str}\n"
+        f"{notes_block}\n"
         "Generate Sound Board parameters and per-day-part audio targets "
         "based solely on the personality scores above and the character of each day-part. "
         "Derive genre_emphasis from the Aaker score mappings — do not infer genres from any brand name or description."
+        + (" Honour any Additional Music Instructions above when setting per-day-part targets." if notes_block else "")
     )
 
 
@@ -116,6 +124,7 @@ def get_sound_board(
     chat_client: AzureOpenAI,
     deployment: str,
     max_retries: int = 3,
+    music_notes: str = "",
 ) -> dict:
     """
     Call Azure OpenAI to produce a Sound Board JSON from the Brand Profile.
@@ -126,11 +135,12 @@ def get_sound_board(
         chat_client:   Configured AzureOpenAI client.
         deployment:    Chat model deployment name.
         max_retries:   Max retry attempts on rate-limit errors.
+        music_notes:   Free-text instructions from the brand form (e.g. "upbeat after 6pm").
 
     Returns:
         Parsed Sound Board dict with 'sound_board' and 'day_parts' keys.
     """
-    user_prompt = _build_user_prompt(brand_profile, category)
+    user_prompt = _build_user_prompt(brand_profile, category, music_notes)
 
     for attempt in range(1, max_retries + 1):
         try:

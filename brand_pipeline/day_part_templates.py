@@ -78,54 +78,6 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
         },
     ],
 
-    "jewelry": [
-        {
-            "name": "Opening",
-            "start_time": "10:00",
-            "end_time": "13:00",
-            "character": "Elegant, instrumental, low tempo — luxury feel on entry",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "17:00",
-            "character": "Sophisticated, slightly warmer — browsing peak",
-        },
-        {
-            "name": "Closing",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Refined, calm — high-consideration purchase environment",
-        },
-    ],
-
-    "fashion": [
-        {
-            "name": "Morning",
-            "start_time": "10:00",
-            "end_time": "13:00",
-            "character": "Fresh, on-trend, moderate energy — setting the tone",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "17:00",
-            "character": "Peak shopping, upbeat pop/dance — drive dwell time",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Energetic, trendy — after-work shoppers",
-        },
-        {
-            "name": "Late",
-            "start_time": "20:00",
-            "end_time": "22:00",
-            "character": "Cooler, chill — closing wind-down",
-        },
-    ],
-
     "fine_dine": [
         {
             "name": "Lunch Service",
@@ -207,162 +159,78 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
         },
     ],
 
-    "furniture": [
+    "jewelry": [
         {
-            "name": "Morning",
+            "name": "Opening",
             "start_time": "10:00",
             "end_time": "13:00",
-            "character": "Calm, Scandinavian-aesthetic, low tempo — mindful browsing",
+            "character": "Elegant, instrumental, low tempo — luxury feel on entry",
         },
         {
             "name": "Afternoon",
             "start_time": "13:00",
             "end_time": "17:00",
-            "character": "Warm, comfortable — family browsing peak",
+            "character": "Sophisticated, slightly warmer — browsing peak",
         },
         {
-            "name": "Evening",
+            "name": "Closing",
             "start_time": "17:00",
             "end_time": "20:00",
-            "character": "Relaxed, melodic — closing hour",
+            "character": "Refined, calm — high-consideration purchase environment",
         },
     ],
 
-    "mall": [
+    "fashion_footwear": [
         {
             "name": "Morning",
             "start_time": "10:00",
             "end_time": "13:00",
-            "character": "Upbeat, mainstream pop — setting shopper mood",
+            "character": "Fresh, on-trend, moderate energy — setting the tone for apparel and footwear browsing",
         },
         {
-            "name": "Afternoon Peak",
+            "name": "Afternoon",
             "start_time": "13:00",
             "end_time": "17:00",
-            "character": "High energy, diverse genres — maximum footfall",
+            "character": "Peak shopping, upbeat pop/dance — drive dwell time across fashion and shoe sections",
         },
         {
             "name": "Evening",
             "start_time": "17:00",
             "end_time": "20:00",
-            "character": "Energetic, youthful — after-school/work crowd",
+            "character": "Energetic, trendy — after-work shoppers browsing latest styles",
         },
         {
             "name": "Closing",
             "start_time": "20:00",
             "end_time": "22:00",
-            "character": "Mellowed — wind-down, encourage final purchases",
+            "character": "Cooler, chill — wind-down, last purchases of the day",
         },
     ],
 
-    "casual_dine": [
-        {
-            "name": "Lunch",
-            "start_time": "11:00",
-            "end_time": "14:00",
-            "character": "Upbeat, friendly, moderate tempo — relaxed lunch crowd",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "14:00",
-            "end_time": "17:00",
-            "character": "Easy listening, light pop — quieter between-meal period",
-        },
-        {
-            "name": "Dinner",
-            "start_time": "17:00",
-            "end_time": "22:00",
-            "character": "Warm, social, moderate energy — evening dining crowd",
-        },
-    ],
-
-    "spa": [
-        {
-            "name": "Morning",
-            "start_time": "09:00",
-            "end_time": "12:00",
-            "character": "Calm, meditative, ambient — morning treatment sessions",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "12:00",
-            "end_time": "17:00",
-            "character": "Deeply relaxing, instrumental — peak treatment hours",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "21:00",
-            "character": "Gentle, serene, acoustic — wind-down after-work guests",
-        },
-    ],
-
-    "gym": [
+    "fitness_wellness": [
         {
             "name": "Early Morning",
             "start_time": "06:00",
             "end_time": "09:00",
-            "character": "High energy, fast tempo, motivating — pre-work workout crowd",
+            "character": "High energy, fast tempo, motivating — pre-work workout crowd and early wellness sessions",
         },
         {
             "name": "Mid Morning",
             "start_time": "09:00",
             "end_time": "12:00",
-            "character": "Steady high energy, electronic/hip-hop — regular morning members",
+            "character": "Steady energetic for gym floors; calm and meditative for spa and treatment areas",
         },
         {
             "name": "Afternoon",
             "start_time": "12:00",
             "end_time": "17:00",
-            "character": "Energetic, upbeat — lunchtime and afternoon workouts",
+            "character": "Upbeat and driving for fitness zones; deeply relaxing and instrumental for wellness spaces",
         },
         {
             "name": "Evening Peak",
             "start_time": "17:00",
             "end_time": "21:00",
-            "character": "Maximum energy, driving beats — after-work rush hour",
-        },
-    ],
-
-    "salon": [
-        {
-            "name": "Morning",
-            "start_time": "09:00",
-            "end_time": "12:00",
-            "character": "Relaxed, friendly pop — easy morning appointments",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "12:00",
-            "end_time": "17:00",
-            "character": "Upbeat, trendy — busy afternoon bookings",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Warm, conversational energy — after-work appointments",
-        },
-    ],
-
-    "bookstore": [
-        {
-            "name": "Morning",
-            "start_time": "09:00",
-            "end_time": "13:00",
-            "character": "Calm, instrumental, low tempo — quiet browsing atmosphere",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "18:00",
-            "character": "Soft, acoustic, intellectual — peak browsing hours",
-        },
-        {
-            "name": "Evening",
-            "start_time": "18:00",
-            "end_time": "21:00",
-            "character": "Mellow, warm — evening readers and events",
+            "character": "Maximum energy for after-work gym rush; gentle and serene wind-down for spa guests",
         },
     ],
 
@@ -384,117 +252,6 @@ DAY_PART_TEMPLATES: dict[str, list[dict]] = {
             "start_time": "18:00",
             "end_time": "21:00",
             "character": "Sleek, contemporary — after-work shoppers",
-        },
-    ],
-
-    "kids_store": [
-        {
-            "name": "Morning",
-            "start_time": "10:00",
-            "end_time": "13:00",
-            "character": "Playful, cheerful, upbeat — families with young children",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "18:00",
-            "character": "Fun, energetic, positive — peak family shopping hours",
-        },
-        {
-            "name": "Evening",
-            "start_time": "18:00",
-            "end_time": "20:00",
-            "character": "Lively but winding down — last shoppers of the day",
-        },
-    ],
-
-    "bar_lounge": [
-        {
-            "name": "Happy Hour",
-            "start_time": "16:00",
-            "end_time": "19:00",
-            "character": "Upbeat, social, moderate energy — after-work crowd arrives",
-        },
-        {
-            "name": "Evening",
-            "start_time": "19:00",
-            "end_time": "22:00",
-            "character": "Warm, jazz/lounge, conversational — dinner and drinks crowd",
-        },
-        {
-            "name": "Late Night",
-            "start_time": "22:00",
-            "end_time": "01:00",
-            "character": "Higher energy, danceable — late-night crowd builds",
-        },
-    ],
-
-    "clinic": [
-        {
-            "name": "Morning",
-            "start_time": "08:00",
-            "end_time": "12:00",
-            "character": "Calm, reassuring, soft — patients in waiting area",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "12:00",
-            "end_time": "17:00",
-            "character": "Gentle, ambient, low stress — steady appointment flow",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Soft, soothing — end-of-day patients",
-        },
-    ],
-
-    "coworking": [
-        {
-            "name": "Morning",
-            "start_time": "08:00",
-            "end_time": "12:00",
-            "character": "Focused, lo-fi, moderate energy — deep work hours",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "12:00",
-            "end_time": "17:00",
-            "character": "Productive, steady tempo — collaborative afternoon sessions",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "21:00",
-            "character": "Relaxed, ambient — late workers and evening members",
-        },
-    ],
-
-    "footwear": [
-        {
-            "name": "Morning",
-            "start_time": "10:00",
-            "end_time": "13:00",
-            "character": "Energetic, on-trend, moderate tempo — opening hours, early browsers",
-        },
-        {
-            "name": "Afternoon",
-            "start_time": "13:00",
-            "end_time": "17:00",
-            "character": "Upbeat, rhythmic, peak dwell time — high footfall shopping hours",
-        },
-        {
-            "name": "Evening",
-            "start_time": "17:00",
-            "end_time": "20:00",
-            "character": "Energetic, youthful, trendy — after-work and evening shoppers",
-        },
-        {
-            "name": "Closing",
-            "start_time": "20:00",
-            "end_time": "22:00",
-            "character": "Mellowed, cool — wind-down, last purchases of the day",
         },
     ],
 

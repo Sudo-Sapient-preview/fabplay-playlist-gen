@@ -68,23 +68,6 @@ def compute_mmr_score(candidate: dict, dp: dict, selected: list[dict], lam: floa
     return lam * rel - (1.0 - lam) * max_sim
 
 
-# ─── Duration fill ─────────────────────────────────────────────────────────────
-
-def _fill_to_duration(ordered: list[dict], target_seconds: float, target_count: int) -> list[dict]:
-    if not ordered:
-        return ordered
-    total = sum(float(t.get("duration_seconds", 210)) for t in ordered)
-    if total >= target_seconds and len(ordered) >= target_count:
-        return ordered
-    recycle = sorted(ordered, key=lambda t: t.get("relevance_score", 0.0), reverse=True)
-    result, idx = list(ordered), 0
-    while total < target_seconds and len(result) < target_count * 2:
-        t = dict(recycle[idx % len(recycle)])
-        result.append(t)
-        total += float(t.get("duration_seconds", 210))
-        idx += 1
-    return result
-
 
 # ─── Fast MMR ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +78,7 @@ def mmr_select(
     target_count:   int,
     target_seconds: float,
     lam:            float = 0.7,
+    spillover:      list[dict] | None = None,
 ) -> list[dict]:
     """
     Numpy-vectorised MMR with incremental max_sim update.
@@ -162,7 +146,20 @@ def mmr_select(
         ))                                                              # (n,)
         max_sim = np.maximum(max_sim, new_sims)
 
-    if total_duration < target_seconds or len(selected) < target_count:
-        selected = _fill_to_duration(selected, target_seconds, target_count)
+    # If still short on duration, fill with nearest-matching songs from the spillover pool.
+    # These are songs outside the original filtered candidate set, sorted by closeness
+    # to the day-part target (energy, BPM, valence) — no song is ever repeated.
+    if total_duration < target_seconds and spillover:
+        selected_ids = {t.get("song_id") for t in selected}
+        fill_pool = [t for t in spillover if t.get("song_id") not in selected_ids]
+        fill_pool.sort(key=lambda t: compute_relevance(t, dp), reverse=True)
+        for t in fill_pool:
+            if total_duration >= target_seconds:
+                break
+            t = dict(t)
+            t["relevance_score"] = compute_relevance(t, dp)
+            t["mmr_score"] = t["relevance_score"]
+            selected.append(t)
+            total_duration += float(t.get("duration_seconds", 210))
 
     return selected

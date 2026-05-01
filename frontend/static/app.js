@@ -82,14 +82,15 @@ return {
   form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''},
 
   cats: [
-    {v:'cafe',l:'☕ Café'},{v:'qsr',l:'🍔 QSR / Fast Food'},{v:'fine_dine',l:'🍽️ Fine Dining'},
-    {v:'casual_dine',l:'🍽️ Casual Dining'},{v:'fashion',l:'👟 Fashion'},
-    {v:'jewelry',l:'💎 Jewelry'},{v:'supermarket',l:'🛒 Supermarket'},{v:'hotel',l:'🏨 Hotel'},
-    {v:'mall',l:'🏬 Mall'},{v:'spa',l:'🧘 Spa / Wellness'},{v:'gym',l:'💪 Gym / Fitness'},
-    {v:'salon',l:'✂️ Salon'},{v:'bookstore',l:'📚 Bookstore'},{v:'electronics',l:'💻 Electronics'},
-    {v:'kids_store',l:'🧸 Kids Store'},{v:'bar_lounge',l:'🍸 Bar / Lounge'},
-    {v:'clinic',l:'🏥 Clinic'},{v:'coworking',l:'💼 Coworking'},{v:'furniture',l:'🛋️ Furniture'},
-    {v:'footwear',l:'👟 Footwear'},
+    {v:'fashion_footwear',l:'👗 Fashion & Footwear'},
+    {v:'jewelry',l:'💎 Jewelry & Luxury Retail'},
+    {v:'cafe',l:'☕ Cafes & Coffee Shops'},
+    {v:'qsr',l:'🍔 Quick Service Restaurants (QSR)'},
+    {v:'fine_dine',l:'🍽️ Fine Dining Restaurants'},
+    {v:'supermarket',l:'🛒 Supermarkets & Grocery Stores'},
+    {v:'hotel',l:'🏨 Hotels & Hospitality'},
+    {v:'fitness_wellness',l:'💪 Fitness & Wellness'},
+    {v:'electronics',l:'💻 Electronics & Tech Retail'},
   ],
 
   segs: [
@@ -1349,8 +1350,8 @@ return {
 
   // ── UI helpers ─────────────────────────────
   catLabel(v){return(this.cats.find(c=>c.v===v)?.l||v||'').replace(/^[^\s]+\s/,'')},
-  catEmoji(v){const m={cafe:'☕',qsr:'🍔',jewelry:'💎',fashion:'👗',fine_dine:'🍽️',casual_dine:'🍽️',supermarket:'🛒',hotel:'🏨',furniture:'🛋️',mall:'🏬',spa:'🧘',gym:'💪',salon:'✂️',bookstore:'📚',electronics:'💻',kids_store:'🧸',bar_lounge:'🍸',clinic:'🏥',coworking:'💼',footwear:'👟'};return m[v]||'🏪'},
-  catColor(v){const m={cafe:'#92400E',qsr:'#991B1B',jewelry:'#6D28D9',fashion:'#1D4ED8',fine_dine:'#111827',supermarket:'#15803D',mall:'#4C1D95',hotel:'#0C4A6E',spa:'#065F46',gym:'#7F1D1D',salon:'#831843',bookstore:'#713F12',electronics:'#1E3A8A',kids_store:'#1E40AF',bar_lounge:'#4C1D95',clinic:'#0C4A6E',coworking:'#064E3B',footwear:'#78350F'};return m[v]||'#374151'},
+  catEmoji(v){const m={fashion_footwear:'👗',jewelry:'💎',cafe:'☕',qsr:'🍔',fine_dine:'🍽️',supermarket:'🛒',hotel:'🏨',fitness_wellness:'💪',electronics:'💻'};return m[v]||'🏪'},
+  catColor(v){const m={fashion_footwear:'#1D4ED8',jewelry:'#6D28D9',cafe:'#92400E',qsr:'#991B1B',fine_dine:'#111827',supermarket:'#15803D',hotel:'#0C4A6E',fitness_wellness:'#7F1D1D',electronics:'#1E3A8A'};return m[v]||'#374151'},
   segLabel(v){return this.segs.find(s=>s.v===v)?.l||v||'Mid-Range'},
   _timeAgo(ts){
     try{const dt=new Date(ts);const now=new Date();const s=Math.floor((now-dt)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}catch(e){return''}
