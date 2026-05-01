@@ -427,7 +427,7 @@
     <div class="card p-6" style="border:none">
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-bold">Acoustic Design Elements</h3>
-        <button :disabled="!sbAcousticDirty" @click="saveAcousticChanges()" class="btn btn-r" :style="!sbAcousticDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
+        <button :disabled="!sbAcousticDirty" @click="saveAcousticChanges()" class="btn btn-r" :style="!sbAcousticDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
       <!-- Day-part selector: click to edit that day-part's targets -->
       <div class="flex gap-1 overflow-x-auto pb-2 mb-4">
@@ -476,7 +476,7 @@
     <div class="card p-6">
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-bold">Genre Hard Filters</h3>
-        <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
+        <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
       <p class="text-xs text-[var(--muted)] mb-3">Click to cycle: <span style="color:#10B981" class="font-semibold">Include</span> → <span style="color:var(--red)" class="font-semibold">Exclude</span> → Neutral. Save to apply to next playlist.</p>
       <div class="flex flex-wrap gap-2">
@@ -490,7 +490,7 @@
     <div class="card p-6">
       <div class="flex items-center justify-between mb-4">
         <h3 class="font-bold">Day-Part Timeline</h3>
-        <button :disabled="!sbTimelineDirty" @click="saveTimelineChanges()" class="btn btn-r" :style="!sbTimelineDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''" style="padding:6px 9px;height:auto;display:flex;align-items:center;justify-content:center" title="Save Changes"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></button>
+        <button :disabled="!sbTimelineDirty" @click="saveTimelineChanges()" class="btn btn-r" :style="!sbTimelineDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
       <div class="flex rounded-lg overflow-hidden mb-3" style="height:44px">
         <template x-for="(dp,i) in (curBrand?.sound_board_result?.day_parts||[])" :key="i">
