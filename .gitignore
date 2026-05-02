@@ -5,3 +5,5 @@ data/brands_store.json
 data/playlists_store.json
 songs_manifest.json
 *.mp3
+
+/core
