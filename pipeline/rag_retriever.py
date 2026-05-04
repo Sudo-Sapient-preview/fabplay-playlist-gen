@@ -9,7 +9,7 @@ For each day-part:
 
 import logging
 
-from backend.db import fetch_all_songs, fetch_songs_filtered, fetch_songs_by_artist, fetch_songs_by_genre
+from api.db import fetch_all_songs, fetch_songs_filtered, fetch_songs_by_artist, fetch_songs_by_genre, get_supabase
 from pipeline.mmr_scorer import compute_relevance
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,47 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
     return [x.strip() for x in str(raw).split(",") if x.strip()]
 
 
+# ─── Analysis features (clap_audio_512, mood, arousal) ───────────────────────
+
+def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
+    """Fetch clap_audio_512, mood_predicted_labels, arousal from analysis_song_features."""
+    if not song_ids:
+        return {}
+    client = get_supabase()
+    features: dict[str, dict] = {}
+    batch_size = 500
+    for i in range(0, len(song_ids), batch_size):
+        batch = song_ids[i : i + batch_size]
+        rows = (
+            client.table("analysis_song_features")
+            .select("song_id,clap_audio_512,mood_predicted_labels,arousal")
+            .in_("song_id", batch)
+            .execute()
+            .data or []
+        )
+        for row in rows:
+            features[str(row["song_id"])] = {
+                "clap_audio_512":        row.get("clap_audio_512"),
+                "mood_predicted_labels": row.get("mood_predicted_labels"),
+                "arousal":               row.get("arousal"),
+            }
+    return features
+
+
+def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> None:
+    for song in songs:
+        sid = str(song.get("song_id", song.get("id", "")))
+        f = features.get(sid)
+        if not f:
+            continue
+        if f.get("clap_audio_512"):
+            song["clap_audio_512"] = f["clap_audio_512"]
+        if f.get("mood_predicted_labels") is not None:
+            song["mood_predicted_labels"] = f["mood_predicted_labels"]
+        if f.get("arousal") is not None:
+            song["arousal"] = f["arousal"]
+
+
 # ─── Main retriever ───────────────────────────────────────────────────────────
 
 # Top N songs passed to MMR per day-part (sorted by relevance).
@@ -192,6 +233,13 @@ def retrieve_candidates(
         candidates = (fresh + stale)[:MAX_CANDIDATES]
     else:
         candidates = all_playable[:MAX_CANDIDATES]
+
+    # 4. Attach clap_audio_512, mood_predicted_labels, arousal to candidates.
+    song_ids = [str(t.get("song_id", t.get("id", ""))) for t in candidates]
+    analysis = _fetch_analysis_features(song_ids)
+    if analysis:
+        _attach_analysis_features(candidates, analysis)
+        logger.debug("Analysis features attached for %d/%d candidates", len(analysis), len(candidates))
 
     return candidates, all_playable, {"filtered_count": len(candidates), "skipped": False}
 

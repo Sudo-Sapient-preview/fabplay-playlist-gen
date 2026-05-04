@@ -1,6 +1,16 @@
 __pycache__/
 *.pyc
+.DS_Store
 .env
+.venv/
+venv/
+.claude/
+.codex-temp/
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+phase*-runserver.err.log
+phase*-runserver.out.log
 data/brands_store.json
 data/playlists_store.json
 songs_manifest.json

@@ -1,25 +1,16 @@
 services:
-  backend:
+  django:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile.django
     env_file:
       - .env
+    init: true
     ports:
-      - "8001:8001"
+      - "8000:8000"
+    restart: unless-stopped
     volumes:
       - fabplay_data:/app/data
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    environment:
-      BACKEND_URL: http://backend:8001
-    ports:
-      - "8003:8003"
-    depends_on:
-      - backend
 
 volumes:
   fabplay_data:

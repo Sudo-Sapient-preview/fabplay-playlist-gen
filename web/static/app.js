@@ -115,6 +115,36 @@ return {
     {k:'speechiness_target',l:'Speechiness',c:'#06B6D4',fmt:v=>v.toFixed(2),pct:v=>v*100},
   ],
 
+  animateActiveView(){
+    if(!window.gsap) return;
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const activePage=[...document.querySelectorAll('.fade')].find(el=>window.getComputedStyle(el).display!=='none');
+    if(!activePage) return;
+    const cards=[...activePage.querySelectorAll('.brand-card, .card, .stat-card, .tr')]
+      .filter(el=>window.getComputedStyle(el).display!=='none')
+      .slice(0,8);
+    window.gsap.killTweensOf(activePage);
+    window.gsap.fromTo(
+      activePage,
+      {autoAlpha:0,y:12},
+      {autoAlpha:1,y:0,duration:0.32,ease:'power2.out',clearProps:'opacity,transform,visibility'}
+    );
+    if(cards.length){
+      window.gsap.killTweensOf(cards);
+      window.gsap.fromTo(
+        cards,
+        {autoAlpha:0,y:18},
+        {autoAlpha:1,y:0,duration:0.4,stagger:0.05,ease:'power2.out',clearProps:'opacity,transform,visibility',delay:0.05}
+      );
+    }
+  },
+
+  scheduleViewAnimation(){
+    this.$nextTick(()=>{
+      window.requestAnimationFrame(()=>this.animateActiveView());
+    });
+  },
+
   async init(){
     if (!this.authToken()) { window.location.href = '/login'; return; }
     // Single bootstrap call: user + brands in one round trip
@@ -144,6 +174,7 @@ return {
       await this.openBrand(active.id);
     }
     this.loading = false;
+    this.scheduleViewAnimation();
 
     // Load non-critical data in background after UI is shown
     Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres()]);
@@ -162,12 +193,15 @@ return {
         try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
         this.plLoading=false;
       }
+      this.scheduleViewAnimation();
     });
     this.$watch('curBrand', () => {
       if(this.page==='soundboard') this.scheduleSbChartsInit();
+      this.scheduleViewAnimation();
     });
     this.$watch('curPl', () => {
       if(this.page==='soundboard') this.scheduleSbChartsInit();
+      this.scheduleViewAnimation();
     });
   },
 
@@ -539,6 +573,7 @@ return {
     this.page='playlists';
     try{const r=await this.apiFetch('/api/playlists/'+id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
     this.plLoading=false;
+    this.scheduleViewAnimation();
   },
 
   goToSoundboard(){
