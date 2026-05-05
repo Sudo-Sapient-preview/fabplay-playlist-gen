@@ -76,6 +76,7 @@ return {
   // Approval / selection state: keyed by "dpIdx-trackIdx"
   approvedTracks: {},
   replacingTrack: null,
+  suggestingTrack: null,
   plGenreFilter: '',
   plLoading: false,
 
@@ -716,18 +717,20 @@ return {
       this._pendingVals={};
       this._sliderRaf=null;
       const sb=this.curBrand?.sound_board_result;
-      const activeDp=sb?.day_parts?.[this.activeDp];
       pending.forEach(({p:_p,val:_val})=>{
         if(sb){
           if(!sb.sound_board)sb.sound_board={};
           sb.sound_board[_p.key+'_target']=_val;
-          if(activeDp)activeDp[_p.key+'_target']=_val;
+          // Apply to ALL day parts so every time-slot uses the new target during generation
+          sb.day_parts?.forEach(dp=>{dp[_p.key+'_target']=_val;});
         }
         _p.target=_val;
         _p.pct=_p.key==='tempo'?((_val-60)/120)*100:_val*100;
         _p.display=_p.key==='tempo'?Math.round(_val)+' BPM':parseFloat(_val).toFixed(2);
       });
       this.sbAcousticDirty=true;
+      this._refreshTimeline();
+      this.sbVersion++;
     });
   },
 
@@ -763,6 +766,7 @@ return {
       sb.day_parts?.forEach(dp=>{dp[k+'_target']=orig});
     });
     this.sbAcousticDirty=false;
+    this._refreshTimeline();
     this.sbVersion++;
   },
 
@@ -1333,6 +1337,17 @@ return {
       }
     }catch(e){alert('Could not replace track: '+(e.message||'Please try again.'))}
     finally{this.replacingTrack=null}
+  },
+  async suggestTracks(dpIdx, ti, songId){
+    const key=dpIdx+'-'+ti;
+    this.suggestingTrack=key;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks/suggest',{method:'POST',body:JSON.stringify({day_part_index:dpIdx,song_id:songId,top_k:8})});
+      if(!r||!r.ok){const e=await r?.json().catch(()=>({}));throw new Error(e.error||'Suggest failed')}
+      const data=await r.json();
+      this.curPl.day_parts[dpIdx]=data.day_part;
+    }catch(e){alert('Could not find similar songs: '+(e.message||'Please try again.'))}
+    finally{this.suggestingTrack=null}
   },
   nextTrack(){if(!this.npQueue.length)return;let n=this.npQueueIdx+1;while(n<this.npQueue.length&&!this.npQueue[n].src)n++;if(n<this.npQueue.length){this.npQueueIdx=n;const t=this.npQueue[n];this._loadAndPlay(t,t._ti,t._dpIdx)}},
   prevTrack(){if(!this.npQueue.length)return;let p=this.npQueueIdx-1;while(p>=0&&!this.npQueue[p].src)p--;if(p>=0){this.npQueueIdx=p;const t=this.npQueue[p];this._loadAndPlay(t,t._ti,t._dpIdx)}},

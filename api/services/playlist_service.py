@@ -136,6 +136,87 @@ def remove_tracks(brand_id: str, user_id: str, day_part_index: int, song_ids: li
     return {"ok": True, "day_part": day_part}, None, None
 
 
+def suggest_tracks(brand_id: str, user_id: str, day_part_index: int, song_id: str, top_k: int = 8) -> tuple[dict | None, str | None, int | None]:
+    _, message, status = _assert_brand_access(brand_id, user_id)
+    if message:
+        return None, message, status
+
+    playlists = get_playlists()
+    if brand_id not in playlists:
+        return None, "No playlist found", 404
+
+    playlist = playlists[brand_id]
+    day_parts = playlist.get("day_parts", [])
+    if day_part_index < 0 or day_part_index >= len(day_parts):
+        return None, "Invalid day_part_index", 400
+
+    day_part = day_parts[day_part_index]
+    tracks = day_part.get("tracks", [])
+    if not any(t.get("song_id") == song_id for t in tracks):
+        return None, "Track not found in day-part", 404
+
+    used_ids = {t.get("song_id") for dp in day_parts for t in dp.get("tracks", [])}
+
+    all_songs = fetch_all_songs()
+    for s in all_songs:
+        if "song_id" not in s:
+            s["song_id"] = s.get("id", "")
+
+    query_song = next((s for s in all_songs if s["song_id"] == song_id), None)
+    if not query_song:
+        return None, "Song not found in catalog", 404
+
+    inputs = pipeline_inputs(get_brands()[brand_id])
+    candidates = apply_exclusion_filters_only(all_songs, inputs)
+    candidates = [s for s in candidates if s["song_id"] not in used_ids]
+    if not candidates:
+        return None, "No suggestions available", 404
+
+    # Pre-rank by feature-vector similarity, then fetch CLAP for top 200
+    pre_ranked = sorted(candidates, key=lambda c: compute_track_sim(c, query_song), reverse=True)
+    top_candidates = pre_ranked[:200]
+
+    analysis_ids = [s["song_id"] for s in top_candidates] + [song_id]
+    analysis = _fetch_analysis_features(analysis_ids)
+    if analysis:
+        _attach_analysis_features(top_candidates, analysis)
+        q_feat = analysis.get(song_id)
+        if q_feat:
+            if q_feat.get("clap_audio_512"):
+                query_song["clap_audio_512"] = q_feat["clap_audio_512"]
+            if q_feat.get("mood_predicted_labels") is not None:
+                query_song["mood_predicted_labels"] = q_feat["mood_predicted_labels"]
+            if q_feat.get("arousal") is not None:
+                query_song["arousal"] = q_feat["arousal"]
+
+    final_ranked = sorted(top_candidates, key=lambda c: compute_track_sim(c, query_song), reverse=True)
+    top = final_ranked[:top_k]
+
+    new_tracks = []
+    for song in top:
+        song["relevance_score"] = compute_track_sim(song, query_song)
+        track = fmt_track(song)
+        track["suggested"] = True
+        new_tracks.append(track)
+
+    day_part["tracks"].extend(new_tracks)
+    _recalc_daypart_stats(day_part)
+    save_playlists(playlists)
+
+    try:
+        _sync_playlist_songs(brand_id, user_id, day_parts)
+    except Exception:
+        pass
+    try:
+        _persist_playlist_snapshot(brand_id, user_id, playlist)
+    except Exception:
+        pass
+
+    for track in day_part.get("tracks", []):
+        track["src"] = resolve_track_src(track)
+    return {"ok": True, "added": len(new_tracks), "day_part": day_part}, None, None
+
+
 def replace_track(brand_id: str, user_id: str, day_part_index: int, song_id: str) -> tuple[dict | None, str | None, int | None]:
     _, message, status = _assert_brand_access(brand_id, user_id)
     if message:

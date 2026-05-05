@@ -76,6 +76,11 @@ urlpatterns = [
         playlist_views.replace_track_view,
         name="api-playlist-replace-track",
     ),
+    path(
+        "playlists/<str:brand_id>/tracks/suggest",
+        playlist_views.suggest_tracks_view,
+        name="api-playlist-suggest-tracks",
+    ),
     path("catalog/genres", catalog_views.genres, name="api-catalog-genres"),
     path("catalog/stats", catalog_views.stats, name="api-catalog-stats"),
     path("catalog/songs", catalog_views.songs, name="api-catalog-songs"),

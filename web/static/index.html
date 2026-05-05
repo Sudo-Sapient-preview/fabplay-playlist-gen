@@ -591,12 +591,12 @@
               Remove selected
             </button>
           </div>
-          <div class="tr playlist-track-head bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px;border-bottom:1px solid var(--bdr);cursor:default;position:relative;z-index:10">
-            <span></span><span>#</span><span>Title</span><span>Genre</span><span class="col-tip-wrap">BPM<span class="col-tip-icon">i<span class="col-tip-box">Beats Per Minute</span></span></span><span class="col-tip-wrap">BFS<span class="col-tip-icon">i<span class="col-tip-box">Brand Fit Score</span></span></span><span></span>
+          <div class="tr playlist-track-head bg-[#FAFAF8] font-bold text-[10px] text-[var(--faint)] uppercase tracking-wider" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px 32px;border-bottom:1px solid var(--bdr);cursor:default;position:relative;z-index:10">
+            <span></span><span>#</span><span>Title</span><span>Genre</span><span class="col-tip-wrap">BPM<span class="col-tip-icon">i<span class="col-tip-box">Beats Per Minute</span></span></span><span class="col-tip-wrap">BFS<span class="col-tip-icon">i<span class="col-tip-box">Brand Fit Score</span></span></span><span></span><span></span>
           </div>
           <div style="overflow:hidden;border-radius:0 0 14px 14px">
           <template x-for="(t,ti) in filteredDpTracks" :key="t._origIdx">
-            <div class="tr playlist-track-row" :class="npTrackKey===t._origIdx+'-'+activeDp?'playing':''" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px">
+            <div class="tr playlist-track-row" :class="npTrackKey===t._origIdx+'-'+activeDp?'playing':''" style="grid-template-columns:28px 30px 1fr 110px 58px 56px 32px 32px">
               <div class="flex items-center justify-center" @click.stop>
                 <input type="checkbox" :checked="isApproved(activeDp,t._origIdx)" @change="toggleApprove(activeDp,t._origIdx)" class="w-3.5 h-3.5 cursor-pointer accent-[var(--red)]">
               </div>
@@ -609,7 +609,8 @@
                   <svg x-show="!(npTrackKey===t._origIdx+'-'+activeDp && npPlaying)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M8 5.14v14l11-7-11-7z"/></svg>
                   <svg x-show="npTrackKey===t._origIdx+'-'+activeDp && npPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                 </button>
-                <span class="font-medium text-xs truncate" x-text="t.title||'Unknown'"></span>
+                <span :style="t.suggested ? 'display:inline-block;width:8px;height:8px;min-width:8px;border-radius:50%;background:#8b5cf6' : 'display:none'" title="Added via song similarity"></span>
+                <span class="font-medium text-xs truncate" :style="t.suggested ? 'color:#7c3aed;font-weight:600' : ''" x-text="t.title||'Unknown'"></span>
               </div>
               <span class="text-xs text-[var(--faint)] truncate" x-text="t.genre||'—'"></span>
               <span class="text-xs text-right font-bold text-blue-600" x-text="t.bpm||'—'"></span>
@@ -625,6 +626,18 @@
                   </svg>
                 </button>
                 <span x-show="replacingTrack===activeDp+'-'+t._origIdx" class="inline-block w-3.5 h-3.5 border-2 border-[var(--faint)] border-t-[var(--accent)] rounded-full animate-spin"></span>
+              </div>
+              <!-- Suggest similar button -->
+              <div class="flex items-center justify-center" @click.stop>
+                <button x-show="suggestingTrack!==activeDp+'-'+t._origIdx"
+                        @click="suggestTracks(activeDp,t._origIdx,t.song_id)"
+                        title="Add 8 similar songs to this day-part"
+                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                  </svg>
+                </button>
+                <span x-show="suggestingTrack===activeDp+'-'+t._origIdx" class="inline-block w-3.5 h-3.5 border-2 border-[var(--faint)] border-t-[var(--accent)] rounded-full animate-spin"></span>
               </div>
             </div>
           </template>
