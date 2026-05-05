@@ -8,6 +8,10 @@ from api.services.brand_service import (
     delete_brand,
     list_brands_for_user,
     rename_playlist,
+    update_dayparts,
+    update_genres,
+    update_profile,
+    update_soundboard_targets,
 )
 from api.utils import err, ok
 
@@ -58,4 +62,63 @@ def rename_playlist_view(request, brand_id: str):
     )
     if not success:
         return err(message or "Rename failed", status or 400)
+    return ok({"ok": True})
+
+
+@require_http_methods(["PUT"])
+@require_auth
+def update_soundboard_view(request, brand_id: str):
+    payload, error_message = _json_body(request)
+    if error_message:
+        return err(error_message, 400)
+    success, message, status = update_soundboard_targets(
+        brand_id, request.user_data["id"], (payload or {}).get("targets", {})
+    )
+    if not success:
+        return err(message or "Save failed", status or 400)
+    return ok({"ok": True})
+
+
+@require_http_methods(["PUT"])
+@require_auth
+def update_dayparts_view(request, brand_id: str):
+    payload, error_message = _json_body(request)
+    if error_message:
+        return err(error_message, 400)
+    success, message, status = update_dayparts(
+        brand_id, request.user_data["id"], (payload or {}).get("day_parts", [])
+    )
+    if not success:
+        return err(message or "Save failed", status or 400)
+    return ok({"ok": True})
+
+
+@require_http_methods(["PUT"])
+@require_auth
+def update_profile_view(request, brand_id: str):
+    payload, error_message = _json_body(request)
+    if error_message:
+        return err(error_message, 400)
+    success, message, status = update_profile(
+        brand_id, request.user_data["id"], payload or {}
+    )
+    if not success:
+        return err(message or "Save failed", status or 400)
+    return ok({"ok": True})
+
+
+@require_http_methods(["PUT"])
+@require_auth
+def update_genres_view(request, brand_id: str):
+    payload, error_message = _json_body(request)
+    if error_message:
+        return err(error_message, 400)
+    success, message, status = update_genres(
+        brand_id,
+        request.user_data["id"],
+        (payload or {}).get("include_genres"),
+        (payload or {}).get("exclude_genres"),
+    )
+    if not success:
+        return err(message or "Save failed", status or 400)
     return ok({"ok": True})

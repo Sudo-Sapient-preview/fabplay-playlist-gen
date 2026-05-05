@@ -19,6 +19,26 @@ urlpatterns = [
         brand_views.rename_playlist_view,
         name="api-brands-rename-playlist",
     ),
+    path(
+        "brands/<str:brand_id>/soundboard",
+        brand_views.update_soundboard_view,
+        name="api-brands-update-soundboard",
+    ),
+    path(
+        "brands/<str:brand_id>/dayparts",
+        brand_views.update_dayparts_view,
+        name="api-brands-update-dayparts",
+    ),
+    path(
+        "brands/<str:brand_id>/profile",
+        brand_views.update_profile_view,
+        name="api-brands-update-profile",
+    ),
+    path(
+        "brands/<str:brand_id>/genres",
+        brand_views.update_genres_view,
+        name="api-brands-update-genres",
+    ),
     path("quick-analyze", generation_views.quick_analyze_view, name="api-quick-analyze"),
     path(
         "analyze-assets-preview",
