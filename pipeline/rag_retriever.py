@@ -8,6 +8,7 @@ For each day-part:
 """
 
 import logging
+import re
 
 from api.db import fetch_all_songs, fetch_songs_filtered, fetch_songs_by_artist, fetch_songs_by_genre, get_supabase
 from pipeline.mmr_scorer import compute_relevance
@@ -49,6 +50,22 @@ def _is_explicit_proxy(track: dict) -> bool:
     )
 
 
+def _matches_song_type(track: dict, song_type: str) -> bool:
+    """Filter by vocal vs instrumental using song_type column, falling back to instrumentalness."""
+    if song_type == "all":
+        return True
+    st = (track.get("song_type") or "").lower().strip()
+    if st in ("vocal", "instrumental"):
+        return st == song_type
+    # Fallback: use instrumentalness threshold only when song_type column is absent
+    inst = float(track.get("instrumentalness", 0.5))
+    if song_type == "vocal":
+        return inst < 0.5
+    if song_type == "instrumental":
+        return inst >= 0.5
+    return True
+
+
 def _apply_hard_filters(
     candidates: list[dict],
     day_part:   dict,
@@ -69,6 +86,7 @@ def _apply_hard_filters(
     exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
     exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit = inputs.get("filter_explicit", True)
+    song_type       = inputs.get("include_song_types", "all")
 
     tempo_min  = day_part.get("tempo_min",  60)
     tempo_max  = day_part.get("tempo_max", 180)
@@ -97,6 +115,8 @@ def _apply_hard_filters(
             continue
         if filter_explicit and _is_explicit_proxy(track):
             continue
+        if not _matches_song_type(track, song_type):
+            continue
 
         filtered.append(track)
 
@@ -114,6 +134,7 @@ def _apply_exclusion_filters_only(
     exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
     exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit = inputs.get("filter_explicit", True)
+    song_type       = inputs.get("include_song_types", "all")
 
     filtered = []
     for track in candidates:
@@ -124,6 +145,8 @@ def _apply_exclusion_filters_only(
         if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
         if filter_explicit and _is_explicit_proxy(track):
+            continue
+        if not _matches_song_type(track, song_type):
             continue
         filtered.append(track)
 
@@ -144,7 +167,7 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 # ─── Analysis features (clap_audio_512, mood, arousal) ───────────────────────
 
 def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
-    """Fetch clap_audio_512, mood_predicted_labels, arousal from analysis_song_features."""
+    """Fetch maest_audio_768, clap_audio_512, mood_predicted_labels, arousal from analysis_song_features."""
     if not song_ids:
         return {}
     client = get_supabase()
@@ -154,13 +177,14 @@ def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
         batch = song_ids[i : i + batch_size]
         rows = (
             client.table("analysis_song_features")
-            .select("song_id,clap_audio_512,mood_predicted_labels,arousal")
+            .select("song_id,maest_audio_768,clap_audio_512,mood_predicted_labels,arousal")
             .in_("song_id", batch)
             .execute()
             .data or []
         )
         for row in rows:
             features[str(row["song_id"])] = {
+                "maest_audio_768":       row.get("maest_audio_768"),
                 "clap_audio_512":        row.get("clap_audio_512"),
                 "mood_predicted_labels": row.get("mood_predicted_labels"),
                 "arousal":               row.get("arousal"),
@@ -174,6 +198,8 @@ def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> N
         f = features.get(sid)
         if not f:
             continue
+        if f.get("maest_audio_768"):
+            song["maest_audio_768"] = f["maest_audio_768"]
         if f.get("clap_audio_512"):
             song["clap_audio_512"] = f["clap_audio_512"]
         if f.get("mood_predicted_labels") is not None:
@@ -182,11 +208,113 @@ def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> N
             song["arousal"] = f["arousal"]
 
 
+# ─── Music notes constraint parser ───────────────────────────────────────────
+
+def _parse_music_notes_constraints(music_notes: str) -> dict:
+    """
+    Parse explicit numeric constraints from free-text music notes.
+
+    Recognises patterns like:
+      "energy >= 0.75", "energy above 0.75", ".75 energy", "0.75 energy"
+      "bpm above 95", "95 bpm", "tempo above 95", "tempo >= 95"
+      "valence >= 0.6", "valence above 0.6"
+
+    Returns a dict with any of: energy_min, energy_max, tempo_min, tempo_max,
+    valence_min, valence_max.  Only keys that were explicitly found are included.
+    """
+    if not music_notes:
+        return {}
+
+    text = music_notes.lower()
+    constraints: dict = {}
+
+    _NUM = r"(\d+(?:\.\d+)?)"
+    _GTE = r"(?:>=|above|over|at\s+least|minimum|min)"
+    _LTE = r"(?:<=|below|under|at\s+most|maximum|max)"
+
+    # ── energy ────────────────────────────────────────────────────────────────
+    # "energy >= 0.75" / "energy above 0.75"
+    m = re.search(rf"energy\s*{_GTE}\s*{_NUM}", text)
+    if m:
+        constraints["energy_min"] = float(m.group(1))
+
+    m = re.search(rf"energy\s*{_LTE}\s*{_NUM}", text)
+    if m:
+        constraints["energy_max"] = float(m.group(1))
+
+    # "0.75 energy" / ".75 energy"
+    m = re.search(rf"{_NUM}\s+energy", text)
+    if m and "energy_min" not in constraints and "energy_max" not in constraints:
+        constraints["energy_min"] = float(m.group(1))
+
+    # ── tempo / bpm ───────────────────────────────────────────────────────────
+    m = re.search(rf"(?:bpm|tempo)\s*{_GTE}\s*{_NUM}", text)
+    if m:
+        constraints["tempo_min"] = float(m.group(1))
+
+    m = re.search(rf"(?:bpm|tempo)\s*{_LTE}\s*{_NUM}", text)
+    if m:
+        constraints["tempo_max"] = float(m.group(1))
+
+    # "95 bpm" / "95 tempo"
+    m = re.search(rf"{_NUM}\s+(?:bpm|tempo)", text)
+    if m and "tempo_min" not in constraints and "tempo_max" not in constraints:
+        constraints["tempo_min"] = float(m.group(1))
+
+    # ── valence ───────────────────────────────────────────────────────────────
+    m = re.search(rf"valence\s*{_GTE}\s*{_NUM}", text)
+    if m:
+        constraints["valence_min"] = float(m.group(1))
+
+    m = re.search(rf"valence\s*{_LTE}\s*{_NUM}", text)
+    if m:
+        constraints["valence_max"] = float(m.group(1))
+
+    if constraints:
+        logger.info("Music-notes hard constraints parsed: %s", constraints)
+    return constraints
+
+
+def _apply_music_notes_constraints(songs: list[dict], constraints: dict) -> list[dict]:
+    """Drop any song that violates a parsed music-notes hard constraint."""
+    if not constraints:
+        return songs
+
+    energy_min  = constraints.get("energy_min")
+    energy_max  = constraints.get("energy_max")
+    tempo_min   = constraints.get("tempo_min")
+    tempo_max   = constraints.get("tempo_max")
+    valence_min = constraints.get("valence_min")
+    valence_max = constraints.get("valence_max")
+
+    result = []
+    for t in songs:
+        energy = float(t.get("energy", 0.5))
+        tempo  = float(t.get("tempo_bpm", 120))
+        valence = float(t.get("valence", 0.5))
+
+        if energy_min  is not None and energy  < energy_min:
+            continue
+        if energy_max  is not None and energy  > energy_max:
+            continue
+        if tempo_min   is not None and tempo   < tempo_min:
+            continue
+        if tempo_max   is not None and tempo   > tempo_max:
+            continue
+        if valence_min is not None and valence < valence_min:
+            continue
+        if valence_max is not None and valence > valence_max:
+            continue
+        result.append(t)
+
+    return result
+
+
 # ─── Main retriever ───────────────────────────────────────────────────────────
 
 # Top N songs passed to MMR per day-part (sorted by relevance).
-# 5 day-parts × 75 tracks = 375 max needed; 800 gives comfortable headroom.
-MAX_CANDIDATES = 800
+# 5 day-parts × 75 tracks = 375 max needed; 1200 gives comfortable headroom.
+MAX_CANDIDATES = 1200
 
 
 def retrieve_candidates(
@@ -220,6 +348,15 @@ def retrieve_candidates(
         s for s in _apply_exclusion_filters_only(all_songs, inputs)
         if _has_playable_audio(s)
     ]
+
+    # 2b. Enforce any explicit numeric constraints from music_notes as hard filters.
+    mn_constraints = _parse_music_notes_constraints(inputs.get("music_notes", ""))
+    if mn_constraints:
+        before = len(all_playable)
+        all_playable = _apply_music_notes_constraints(all_playable, mn_constraints)
+        logger.info(
+            "Music-notes constraints reduced pool: %d → %d tracks", before, len(all_playable)
+        )
 
     if not all_playable:
         return [], [], {"filtered_count": 0, "skipped": True}

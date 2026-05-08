@@ -240,7 +240,7 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
                     genre_ids.add(track.get("song_id"))
 
             must_include = list({track.get("song_id"): track for track in must_include + genre_injections}.values())
-            target_seconds = get_day_part_hours(day_part) * 3600
+            target_seconds = get_day_part_hours(day_part) * 3600 * 1.25
             candidate_ids = {track.get("song_id") for track in candidates}
             spillover = [
                 track

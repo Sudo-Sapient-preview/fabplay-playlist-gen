@@ -338,6 +338,14 @@
           </template>
         </div>
       </div>
+      <div>
+        <label class="lbl mb-2">Song Type</label>
+        <div class="flex gap-2">
+          <button type="button" @click="form.include_song_types='all'" :class="form.include_song_types==='all'?'chip-btn chip-on':'chip-btn'">All</button>
+          <button type="button" @click="form.include_song_types='vocal'" :class="form.include_song_types==='vocal'?'chip-btn chip-on':'chip-btn'">Vocal</button>
+          <button type="button" @click="form.include_song_types='instrumental'" :class="form.include_song_types==='instrumental'?'chip-btn chip-on':'chip-btn'">Instrumental</button>
+        </div>
+      </div>
       <div class="toggle-row p-3 rounded-lg" style="border:1px solid var(--bdr)">
         <div>
           <div class="text-sm font-semibold">Filter Explicit Content</div>
@@ -479,6 +487,14 @@
         <h3 class="font-bold">Genre Hard Filters</h3>
         <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
+      <div class="mb-4">
+        <label class="lbl mb-2">Song Type</label>
+        <div class="flex gap-2">
+          <button type="button" @click="sbSongType='all'; sbGenreDirty=true" :class="sbSongType==='all'?'chip-btn chip-on':'chip-btn'">All</button>
+          <button type="button" @click="sbSongType='vocal'; sbGenreDirty=true" :class="sbSongType==='vocal'?'chip-btn chip-on':'chip-btn'">Vocal</button>
+          <button type="button" @click="sbSongType='instrumental'; sbGenreDirty=true" :class="sbSongType==='instrumental'?'chip-btn chip-on':'chip-btn'">Instrumental</button>
+        </div>
+      </div>
       <p class="text-xs text-[var(--muted)] mb-3">Click to cycle: <span style="color:#10B981" class="font-semibold">Include</span> → <span style="color:var(--red)" class="font-semibold">Exclude</span> → Neutral. Save to apply to next playlist.</p>
       <div class="flex flex-wrap gap-2">
         <template x-for="g in genres" :key="g">
@@ -565,7 +581,7 @@
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="curPl.day_parts[activeDp].track_count"></div><div class="text-[10px] text-[var(--faint)]">tracks</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="Math.round((curPl.day_parts[activeDp].total_duration_seconds||0)/60)+'m'"></div><div class="text-[10px] text-[var(--faint)]">duration</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" :class="(curPl.day_parts[activeDp].avg_bfs||0)>=.75?'text-emerald-600':(curPl.day_parts[activeDp].avg_bfs||0)>=.5?'text-amber-500':'text-red-500'" x-text="(curPl.day_parts[activeDp].avg_bfs||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg BFS</div></div>
-          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg text-purple-600" x-text="(curPl.day_parts[activeDp].avg_mmr||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg MMR</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg text-blue-500" x-text="(curPl.day_parts[activeDp].valence_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">valence</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].energy_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">energy</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].tempo_target||0)+' BPM'"></div><div class="text-[10px] text-[var(--faint)]">tempo</div></div>
         </div>
@@ -632,10 +648,8 @@
                 <button x-show="suggestingTrack!==activeDp+'-'+t._origIdx"
                         @click="suggestTracks(activeDp,t._origIdx,t.song_id)"
                         title="Add 8 similar songs to this day-part"
-                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
-                  </svg>
+                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors font-bold text-base leading-none">
+                  ~
                 </button>
                 <span x-show="suggestingTrack===activeDp+'-'+t._origIdx" class="inline-block w-3.5 h-3.5 border-2 border-[var(--faint)] border-t-[var(--accent)] rounded-full animate-spin"></span>
               </div>
@@ -863,7 +877,81 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=19"></script>
+<!-- ══════════ SUGGEST SIMILAR SONGS MODAL ══════════ -->
+<div x-show="pendingSuggestions !== null" class="modal-bg" x-cloak @click.self="dismissSuggestions()" style="z-index:110">
+  <div style="background:#fff;border-radius:16px;width:500px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+
+    <!-- Header -->
+    <div style="padding:20px 20px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0">
+      <div>
+        <h2 style="font-family:var(--font-heading);font-size:18px;font-weight:700;margin:0;color:var(--txt)">Similar Songs</h2>
+        <p style="font-size:12px;color:var(--muted);margin:5px 0 0">▶ to preview &nbsp;·&nbsp; check to select &nbsp;·&nbsp; click Add to save</p>
+      </div>
+      <button @click="dismissSuggestions()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#ccc;line-height:1;padding:2px 0 0 16px;flex-shrink:0">✕</button>
+    </div>
+
+    <!-- Song list -->
+    <div style="overflow-y:auto;flex:1;min-height:0">
+      <template x-for="(s,i) in (pendingSuggestions||[])" :key="s.song_id">
+        <div @click="pendingSuggestionSel={...pendingSuggestionSel,[s.song_id]:!pendingSuggestionSel[s.song_id]}"
+          style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background .12s"
+          :style="{background: pendingSuggestionSel[s.song_id] ? '#F5F1FF' : '#fff'}">
+
+          <!-- Circular play/pause button — object :style so it doesn't wipe display:flex on the button -->
+          <div style="flex-shrink:0" @click.stop>
+            <button @click="npTrackKey===(i+'-sug')?togglePlay():_loadAndPlay(s,i,'sug')"
+              style="width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s"
+              :style="{background: npTrackKey===(i+'-sug') ? 'var(--red)' : '#EDEAE5', color: npTrackKey===(i+'-sug') ? '#fff' : '#888'}">
+              <svg x-show="!(npTrackKey===(i+'-sug')&&npPlaying)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;margin-left:2px"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+              <svg x-show="npTrackKey===(i+'-sug')&&npPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            </button>
+          </div>
+
+          <!-- Title + artist -->
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)" x-text="s.title||'Unknown'"></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="s.artist||'—'"></div>
+          </div>
+
+          <!-- Tags: genre pill · BPM · BFS -->
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+            <span style="font-size:10px;font-weight:600;background:#EDEAE5;color:var(--muted);padding:3px 8px;border-radius:99px;white-space:nowrap;max-width:72px;overflow:hidden;text-overflow:ellipsis;display:inline-block" x-text="s.genre||'—'"></span>
+            <span style="font-size:11px;font-weight:700;color:#3b82f6;min-width:30px;text-align:right" x-text="s.bpm||'—'"></span>
+            <span style="font-size:12px;font-weight:700;min-width:36px;text-align:right"
+              :style="{color: (s.bfs||0)>=.75 ? '#059669' : (s.bfs||0)>=.5 ? '#d97706' : '#ef4444'}"
+              x-text="(s.bfs||0).toFixed(2)"></span>
+          </div>
+
+          <!-- Checkbox -->
+          <div style="flex-shrink:0" @click.stop>
+            <input type="checkbox"
+              :checked="pendingSuggestionSel[s.song_id]"
+              @change="pendingSuggestionSel={...pendingSuggestionSel,[s.song_id]:$event.target.checked}"
+              style="width:16px;height:16px;accent-color:#8b5cf6;cursor:pointer">
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:14px 20px;border-top:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#FAFAF8">
+      <span style="font-size:12px;color:var(--muted)" x-text="Object.values(pendingSuggestionSel).filter(Boolean).length+' of '+(pendingSuggestions||[]).length+' selected'"></span>
+      <div style="display:flex;gap:8px">
+        <button @click="dismissSuggestions()" class="btn btn-w" style="margin:0;padding:8px 18px;font-size:13px">Cancel</button>
+        <button @click="saveSuggestions()"
+          :disabled="savingSuggestions||!Object.values(pendingSuggestionSel).some(Boolean)"
+          class="btn" style="margin:0;padding:8px 18px;font-size:13px;background:#8b5cf6;color:#fff;min-width:130px"
+          :style="{opacity: (savingSuggestions||!Object.values(pendingSuggestionSel).some(Boolean)) ? 0.4 : 1, cursor: (savingSuggestions||!Object.values(pendingSuggestionSel).some(Boolean)) ? 'not-allowed' : 'pointer'}">
+          <span x-show="!savingSuggestions" x-text="'Add '+Object.values(pendingSuggestionSel).filter(Boolean).length+' to Playlist'"></span>
+          <span x-show="savingSuggestions" class="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/static/app.js?v=24"></script>
 </body>
 </html>
 
