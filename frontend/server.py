@@ -1,5 +1,5 @@
 """
-fabPLAY UI v3 — Lightweight frontend server
+Brandbeat — Lightweight frontend server
 Serves the UI and proxies API calls to the MMR backend on port 8001.
 """
 
@@ -16,7 +16,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
 
-app = FastAPI(title="fabPLAY UI v3")
+app = FastAPI(title="Brandbeat")
 
 STATIC_DIR = Path(__file__).parent / "static"
 SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent / "songs")))
@@ -24,12 +24,12 @@ SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent 
 
 @app.get("/favicon.ico")
 async def favicon():
-    return FileResponse(str(STATIC_DIR / "logo.jpg"), media_type="image/jpeg")
+    return FileResponse(str(STATIC_DIR / "favicon.svg"), media_type="image/svg+xml")
 
 
 @app.get("/")
 async def serve_landing():
-    return RedirectResponse("/login", status_code=302)
+    return FileResponse(str(STATIC_DIR / "landing.html"))
 
 
 @app.get("/login")

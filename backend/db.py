@@ -93,7 +93,7 @@ def run_startup_checks(exit_on_fatal: bool = True) -> None:
 _SONG_COLS = (
     "id,title,artist,url,tempo_bpm,duration_seconds,"
     "energy,danceability,loudness,acousticness,instrumentalness,"
-    "speechness,genre,valence"
+    "speechness,genre,valence,song_type"
 )
 
 # DB stores energy on ~0–0.15 scale and valence on ~0–9 scale.

@@ -3,49 +3,107 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Verifying — fabPLAY</title>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Verifying — Brandbeat</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
   :root {
-    --bg: #F9F8F5;
-    --text: #1A1714;
-    --muted: #6B6560;
-    --accent: #C0392B;
-    --font-body: "Space Grotesk", "Segoe UI", sans-serif;
-    --font-heading: "Fraunces", "Times New Roman", serif;
+    --bone:        #F2EEE5;
+    --black:       #0A0A0A;
+    --penguin-red: #B8451F;
+    --slate:       #5A5550;
+    --hairline:    #C5BFB5;
+    --font-display:'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    --font-label:  'Inter Variable', 'Inter', system-ui, sans-serif;
   }
+
+  html, body { min-height: 100vh; -webkit-font-smoothing: antialiased; }
+
   body {
-    font-family: var(--font-body);
-    background: var(--bg);
-    min-height: 100vh;
+    font-family: var(--font-label);
+    background: var(--bone);
+    color: var(--black);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    color: var(--text);
+    gap: 20px;
+    padding: 40px 24px;
   }
-  .logo { height: 44px; margin-bottom: 8px; }
+
+  .wm {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1;
+    display: inline-flex;
+    align-items: baseline;
+    text-decoration: none;
+    margin-bottom: 8px;
+  }
+  .wm-b    { font-size: 48px; color: var(--penguin-red); letter-spacing: -0.05em; margin-right: 3px; line-height: 1; }
+  .wm-rest { font-size: 34px; color: var(--black); letter-spacing: -0.04em; line-height: 1; }
+
   .spinner {
     width: 32px; height: 32px;
-    border: 3px solid #E8E5DE;
-    border-top-color: var(--accent);
+    border: 2px solid var(--hairline);
+    border-top-color: var(--penguin-red);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .msg { font-size: 15px; font-weight: 600; font-family: var(--font-heading); }
-  .sub { font-size: 13px; color: var(--muted); }
-  .err { color: #991B1B; font-size: 13px; text-align: center; max-width: 320px; }
-  a { color: var(--accent); text-decoration: none; font-weight: 600; }
+
+  .msg {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--black);
+    text-align: center;
+  }
+
+  .sub {
+    font-family: var(--font-label);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--slate);
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+
+  .sub.err {
+    color: var(--penguin-red);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--penguin-red);
+    background: transparent;
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-family: var(--font-display);
+    font-size: 16px;
+  }
+
+  a {
+    color: var(--penguin-red);
+    text-decoration: underline;
+    text-underline-offset: 0.3em;
+    text-decoration-thickness: 1px;
+    font-weight: 500;
+  }
+  a:hover { color: var(--black); }
 </style>
 </head>
 <body>
-<img class="logo" src="/static/logo.jpg" alt="fabPLAY">
+
+<a href="/" class="wm" aria-label="Brandbeat home">
+  <span class="wm-b">b</span><span class="wm-rest">randbeat</span>
+</a>
 <div class="spinner" id="spinner"></div>
-<p class="msg" id="msg">Verifying your account…</p>
-<p class="sub" id="sub">Please wait a moment</p>
+<p class="msg" id="msg">Verifying your account.</p>
+<p class="sub" id="sub">Please wait a moment.</p>
 
 <script>
 (async function () {
@@ -55,8 +113,8 @@
 
   function showError(text) {
     spinEl.style.display = 'none';
-    msgEl.textContent = 'Verification failed';
-    subEl.innerHTML = text + ' <a href="/login">Back to Sign In</a>';
+    msgEl.textContent = 'Verification failed.';
+    subEl.innerHTML = text + ' <a href="/login">Back to sign in</a>';
     subEl.classList.add('err');
   }
 
@@ -74,7 +132,7 @@
     const type          = params.get('type');
 
     if (access_token) {
-      msgEl.textContent = 'Email confirmed!';
+      msgEl.textContent = 'Email confirmed.';
       subEl.textContent = 'Redirecting…';
       if (type === 'recovery') {
         storeSession(access_token, refresh_token);
@@ -101,7 +159,7 @@
       });
       const data = await r.json();
       if (!r.ok) { showError(data.error_description || 'Could not verify.'); return; }
-      msgEl.textContent = 'Email confirmed!';
+      msgEl.textContent = 'Email confirmed.';
       subEl.textContent = 'Redirecting to sign in…';
       setTimeout(() => { window.location.href = '/login?confirmed=true'; }, 800);
     } catch(e) {

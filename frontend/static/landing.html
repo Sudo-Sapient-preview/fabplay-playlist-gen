@@ -3,223 +3,722 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fabplay — AI-Powered Music for Your Brand</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/landing.css">
+  <title>Brandbeat — A playlist that sounds like your brand.</title>
+  <meta name="description" content="Brandbeat reads your brand and writes the playlist. Royalty-free music for retail and hospitality, by Audesy.">
+  <meta property="og:title" content="Brandbeat — Music, on brand.">
+  <meta property="og:description" content="A royalty-free playlist that sounds like your brand. Built for retail and hospitality.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/index.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/500-italic.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bone:        #F2EEE5;
+      --black:       #0A0A0A;
+      --penguin-red: #B8451F;
+      --slate:       #5A5550;
+      --bone-tile:   #ECE7DC;
+      --hairline:    #C5BFB5;
+      --pr-hover:    #9C3A1A;
+      --pr-active:   #82301A;
+      --font-display:'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+      --font-label:  'Inter Variable', 'Inter', system-ui, sans-serif;
+      --max-w: 1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-display);
+      font-weight: 500;
+      background: var(--bone);
+      color: var(--black);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    ::selection { background: var(--penguin-red); color: var(--bone); }
+
+    a { color: inherit; text-decoration: none; }
+
+    *:focus-visible {
+      outline: 2px solid var(--penguin-red);
+      outline-offset: 3px;
+    }
+
+    /* ── Container ── */
+    .wrap {
+      margin: 0 auto;
+      width: 100%;
+      max-width: var(--max-w);
+      padding-left: 28px;
+      padding-right: 28px;
+    }
+    @media (min-width: 600px) { .wrap { padding-left: 48px; padding-right: 48px; } }
+    @media (min-width: 900px) { .wrap { padding-left: 80px; padding-right: 80px; } }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      font-family: var(--font-label);
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .btn-primary {
+      background: var(--penguin-red);
+      color: var(--bone);
+      padding: 14px 24px;
+    }
+    .btn-primary:hover  { background: var(--pr-hover); }
+    .btn-primary:active { background: var(--pr-active); }
+    .btn-primary:focus-visible { outline: 2px solid var(--penguin-red); outline-offset: 3px; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--black);
+      padding: 14px 24px;
+      border: 1px solid var(--slate);
+    }
+    .btn-secondary:hover { background: var(--bone-tile); border-color: var(--black); }
+
+    .btn-nav {
+      padding: 8px 16px;
+      background: var(--penguin-red);
+      color: var(--bone);
+      border-radius: 4px;
+      font-family: var(--font-label);
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-decoration: none;
+      transition: background 120ms ease;
+      flex-shrink: 0;
+    }
+    .btn-nav:hover  { background: var(--pr-hover); }
+    .btn-nav:active { background: var(--pr-active); }
+
+    /* ── Navbar ── */
+    .navbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 50;
+      background: rgba(242,238,229,0.95);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    .navbar.scrolled { border-bottom: 1px solid var(--hairline); }
+    .navbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    /* Wordmark — nav scale per spec */
+    .wm { font-family: var(--font-display); font-weight: 600; line-height: 1; display: inline-flex; align-items: baseline; text-decoration: none; }
+    .wm-nav .wm-b    { font-size: 36px; color: var(--penguin-red); letter-spacing: -0.05em; margin-right: 2px; line-height: 1; }
+    .wm-nav .wm-rest { font-size: 25px; color: var(--black); letter-spacing: -0.04em; line-height: 1; }
+    .wm-footer .wm-b    { font-size: 31px; color: var(--penguin-red); letter-spacing: -0.05em; margin-right: 3px; line-height: 1; }
+    .wm-footer .wm-rest { font-size: 22px; color: var(--black); letter-spacing: -0.04em; line-height: 1; }
+
+    .navbar-links {
+      display: none;
+      align-items: center;
+      gap: 32px;
+    }
+    @media (min-width: 768px) { .navbar-links { display: flex; } }
+    .navbar-links a {
+      font-family: var(--font-label);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--slate);
+      transition: color 120ms ease;
+    }
+    .navbar-links a:hover { color: var(--black); }
+
+    /* ── Main ── */
+    main { padding-top: 64px; }
+
+    /* ── Section wrappers ── */
+    .sec-hero   { padding-top: 120px; padding-bottom: 120px; }
+    .sec-std    { border-top: 1px solid var(--hairline); padding-top: 96px; padding-bottom: 96px; }
+    @media (max-width: 900px) {
+      .sec-hero { padding-top: 80px; padding-bottom: 80px; }
+      .sec-std  { padding-top: 64px; padding-bottom: 64px; }
+    }
+
+    /* ── Eyebrow ── */
+    .eyebrow {
+      font-family: var(--font-label);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--slate);
+    }
+
+    /* ── Hero ── */
+    @keyframes bb-fade-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .animate-in { animation: bb-fade-in 200ms ease-out both; }
+
+    .hero-heading {
+      margin-top: 32px;
+      font-family: var(--font-display);
+      font-weight: 600;
+      line-height: 1.02;
+      letter-spacing: -0.025em;
+      color: var(--black);
+      font-size: clamp(44px, 8vw, 90px);
+      max-width: 14em;
+    }
+    /* The single italic accent phrase in penguin red */
+    .hero-heading .accent {
+      color: var(--penguin-red);
+      font-style: italic;
+      font-weight: 500;
+    }
+    .hero-sub {
+      margin-top: 32px;
+      font-family: var(--font-display);
+      font-size: clamp(18px, 2vw, 20px);
+      font-weight: 500;
+      color: var(--slate);
+      max-width: 38em;
+      line-height: 1.55;
+    }
+    .hero-ctas {
+      margin-top: 40px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* ── Shared section headings ── */
+    .sec-h2 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      color: var(--black);
+      font-size: clamp(32px, 5vw, 48px);
+      max-width: 30em;
+    }
+    .sec-h2 .accent {
+      color: var(--penguin-red);
+      font-style: italic;
+      font-weight: 500;
+    }
+
+    /* ── Problem body ── */
+    .prob-body {
+      margin-top: 32px;
+      font-family: var(--font-display);
+      font-size: clamp(17px, 1.8vw, 20px);
+      font-weight: 500;
+      color: var(--black);
+      max-width: 38em;
+      line-height: 1.55;
+    }
+
+    /* ── How it works ── */
+    .steps { margin-top: clamp(56px, 6vw, 80px); list-style: none; }
+    .step {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 24px;
+      padding: 40px 0;
+      border-top: 1px solid var(--hairline);
+    }
+    @media (min-width: 768px) {
+      .step { grid-template-columns: 64px 1fr; gap: 48px; padding: 56px 0; }
+    }
+    .step:first-child { border-top: none; padding-top: 0; }
+    .step-num {
+      font-family: var(--font-label);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      color: var(--slate);
+      padding-top: 14px;
+    }
+    .step-title {
+      font-family: var(--font-display);
+      font-size: clamp(24px, 3vw, 32px);
+      font-weight: 600;
+      line-height: 1.2;
+      color: var(--black);
+    }
+    .step-body {
+      margin-top: 12px;
+      font-family: var(--font-display);
+      font-size: clamp(17px, 1.8vw, 18px);
+      font-weight: 500;
+      color: var(--slate);
+      line-height: 1.6;
+      max-width: 38em;
+    }
+    .how-cta { margin-top: 56px; }
+
+    /* ── Audio preview ── */
+    .audio-sub {
+      margin-top: 20px;
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: clamp(17px, 1.8vw, 18px);
+      font-weight: 500;
+      color: var(--slate);
+      max-width: 38em;
+      line-height: 1.5;
+    }
+    .tracks { margin-top: clamp(40px, 5vw, 56px); }
+    .track-row {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      align-items: center;
+      gap: 20px;
+      padding: 28px 0;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .track-row:last-child { border-bottom: none; }
+    @media (min-width: 640px) {
+      .track-row { grid-template-columns: 44px 1fr 120px 42px; }
+    }
+    .play-btn {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: var(--penguin-red);
+      color: var(--bone);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 120ms ease;
+    }
+    .play-btn:hover  { background: var(--pr-hover); }
+    .play-btn:active { background: var(--pr-active); }
+    .track-info { min-width: 0; }
+    .track-title {
+      font-family: var(--font-display);
+      font-size: clamp(17px, 1.8vw, 18px);
+      font-weight: 600;
+      color: var(--black);
+      line-height: 1.2;
+    }
+    .track-title em { font-style: italic; font-weight: 500; }
+    .track-meta {
+      margin-top: 8px;
+      font-family: var(--font-label);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--slate);
+    }
+    .bar-wrap-mobile {
+      margin-top: 12px;
+      height: 2px;
+      background: var(--hairline);
+      overflow: hidden;
+    }
+    .bar-fill { height: 100%; background: var(--black); width: 0%; transition: width 0.15s linear; }
+    .bar-desktop {
+      display: none;
+      height: 2px;
+      background: var(--hairline);
+      overflow: hidden;
+    }
+    @media (min-width: 640px) {
+      .bar-wrap-mobile { display: none; }
+      .bar-desktop { display: block; }
+    }
+    .track-time {
+      display: none;
+      font-family: var(--font-label);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: var(--slate);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (min-width: 640px) { .track-time { display: block; } }
+
+    /* ── Quiet details ── */
+    .quiet-items { margin-top: clamp(48px, 5vw, 64px); }
+    .quiet-item {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      padding: 32px 0 40px;
+      border-top: 1px solid var(--hairline);
+    }
+    @media (min-width: 768px) {
+      .quiet-item { grid-template-columns: 200px 1fr; gap: 48px; padding: 40px 0; }
+    }
+    .quiet-item:first-child { border-top: none; padding-top: 0; }
+    .quiet-item-title {
+      font-family: var(--font-display);
+      font-size: clamp(22px, 2.5vw, 26px);
+      font-weight: 600;
+      color: var(--black);
+      line-height: 1.2;
+    }
+    .quiet-item-body {
+      font-family: var(--font-display);
+      font-size: clamp(17px, 1.8vw, 18px);
+      font-weight: 500;
+      color: var(--slate);
+      line-height: 1.6;
+      max-width: 38em;
+    }
+
+    /* ── Final CTA ── */
+    .cta-block {
+      position: relative;
+      overflow: hidden;
+      padding: 96px 0;
+    }
+    @media (max-width: 900px) { .cta-block { padding: 64px 0; } }
+    .cta-wm-bg {
+      pointer-events: none;
+      user-select: none;
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .cta-wm-bg img { width: 140%; max-width: none; opacity: 0.07; }
+    .cta-content { position: relative; }
+    .cta-heading {
+      font-family: var(--font-display);
+      font-weight: 600;
+      line-height: 1.05;
+      letter-spacing: -0.025em;
+      color: var(--black);
+      font-size: clamp(36px, 6vw, 64px);
+      max-width: 30em;
+    }
+    .cta-heading .accent {
+      color: var(--penguin-red);
+      font-style: italic;
+      font-weight: 500;
+    }
+    .cta-btn { margin-top: 40px; }
+
+    /* ── Footer ── */
+    .site-footer { border-top: 1px solid var(--hairline); }
+    .footer-inner {
+      padding-top: 80px;
+      padding-bottom: 96px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 48px;
+    }
+    @media (min-width: 768px) {
+      .footer-inner { grid-template-columns: 1fr 1fr; align-items: end; }
+    }
+    .footer-brand { display: flex; flex-direction: column; }
+    @media (min-width: 768px) { .footer-brand { align-items: flex-end; } }
+    .footer-tagline {
+      margin-top: 24px;
+      font-family: var(--font-label);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(90,85,80,0.8);
+      line-height: 2;
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .animate-in { animation: none; }
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
 </head>
-<body class="landing">
-  <header class="site-header">
-    <div class="container nav">
-      <img src="/static/logo.jpg" alt="Fabplay" style="height:42px;">
-      <nav class="nav-links">
-        <a href="#how">How It Works</a>
-        <a href="#why">Why Fabplay</a>
-        <a href="#faq">FAQ</a>
-        <a class="btn btn-primary" href="/login">Get it now</a>
-      </nav>
-    </div>
-  </header>
+<body>
 
-  <section class="hero">
-    <div class="container hero-content">
-      <div>
-        <div class="hero-pill">AI-curated. Royalty-free. Always on-brand.</div>
-        <h1 class="hero-title reveal" style="animation-delay:0.1s;">Your Brand Has a Sound. Let’s Find It.</h1>
-        <p class="hero-subtitle reveal" style="animation-delay:0.2s;">Turn your identity into playlists your customers remember — tuned by AI, approved by you.</p>
-        <div class="hero-actions reveal" style="animation-delay:0.3s;">
-          <a class="btn btn-primary" href="/login">Get Your Brand’s Sound</a>
-          <a class="btn btn-ghost" href="#how">See How It Works</a>
+<!-- ── Navbar ── -->
+<header class="navbar" id="navbar">
+  <div class="wrap navbar-inner">
+    <a href="#top" class="wm wm-nav" aria-label="Brandbeat home">
+      <span class="wm-b">b</span><span class="wm-rest">randbeat</span>
+    </a>
+    <nav class="navbar-links" aria-label="Site navigation">
+      <a href="#how-it-works">How it works</a>
+    </nav>
+    <a href="/login" class="btn-nav">Start a playlist</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Hero ── -->
+  <div id="top" class="sec-hero">
+    <div class="wrap animate-in">
+      <p class="eyebrow">Music, on brand &middot; By Audesy</p>
+      <h1 class="hero-heading">
+        A playlist that sounds <em class="accent">like your brand.</em>
+      </h1>
+      <p class="hero-sub">
+        Brandbeat reads your logo, your voice, your customers, your moment — and assembles a royalty-free playlist your store can play out today. Built for retail and hospitality.
+      </p>
+      <div class="hero-ctas">
+        <a href="/login" class="btn btn-primary">Start a playlist</a>
+        <a href="#audio" class="btn btn-secondary">Hear examples</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Problem ── -->
+  <section class="sec-std">
+    <div class="wrap">
+      <h2 class="sec-h2">
+        Your store has a brand voice. <em class="accent">Your music&nbsp;doesn't.</em>
+      </h2>
+      <p class="prob-body">
+        Most stores play the radio, a personal Spotify account, or nothing at all. The sound does not match the brand, the ambience, or the product. Research shows brand-music congruence increases customer spending by up to 40% — but most businesses have no way to act on that.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── How it works ── -->
+  <section class="sec-std" id="how-it-works">
+    <div class="wrap">
+      <h2 class="sec-h2">How a brief becomes a playlist.</h2>
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num">01</span>
+          <div>
+            <h3 class="step-title">Describe your brand.</h3>
+            <p class="step-body">Share your brand details, upload store photographs, and tell us who walks through the door.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num">02</span>
+          <div>
+            <h3 class="step-title">Our engine reads and composes.</h3>
+            <p class="step-body">Brandbeat analyzes your brand identity — logo, tone, customer profile, time of day — and builds a sound design.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num">03</span>
+          <div>
+            <h3 class="step-title">Press play.</h3>
+            <p class="step-body">A royalty-free playlist, tuned to the moment. Morning, afternoon, holiday, sale. Yours to review, adjust, and publish.</p>
+          </div>
+        </li>
+      </ol>
+      <div class="how-cta">
+        <a href="/login" class="btn btn-primary">Start a playlist</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Audio preview ── -->
+  <section class="sec-std" id="audio">
+    <div class="wrap">
+      <h2 class="sec-h2">Hear it in three rooms.</h2>
+      <p class="audio-sub">Tap to listen. No autoplay, no surprises.</p>
+      <div class="tracks">
+
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3">
+          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+          </button>
+          <div class="track-info">
+            <p class="track-title"><em>Sunday morning, cafe mix.</em></p>
+            <p class="track-meta">Hospitality &middot; AM &middot; 36 tracks &middot; 2 h 14 m</p>
+            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+            <audio preload="none"></audio>
+          </div>
+          <div class="bar-desktop"><div class="bar-fill"></div></div>
+          <div class="track-time">0:00</div>
         </div>
-        <div class="hero-note reveal" style="animation-delay:0.4s;">Free trial. No credit card.</div>
-        <div class="hero-metrics">
-          <div>
-            <strong>500+</strong>
-            <span>Live stores</span>
+
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3">
+          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+          </button>
+          <div class="track-info">
+            <p class="track-title"><em>Saturday afternoon, flagship fashion store.</em></p>
+            <p class="track-meta">Retail &middot; PM &middot; 28 tracks &middot; 1 h 52 m</p>
+            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+            <audio preload="none"></audio>
           </div>
-          <div>
-            <strong>20K+</strong>
-            <span>Licensed tracks</span>
+          <div class="bar-desktop"><div class="bar-fill"></div></div>
+          <div class="track-time">0:00</div>
+        </div>
+
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3">
+          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+          </button>
+          <div class="track-info">
+            <p class="track-title"><em>Friday evening, fine dining.</em></p>
+            <p class="track-meta">Hospitality &middot; Evening &middot; 22 tracks &middot; 1 h 30 m</p>
+            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+            <audio preload="none"></audio>
           </div>
-          <div>
-            <strong>1K+</strong>
-            <span>Playlists</span>
+          <div class="bar-desktop"><div class="bar-fill"></div></div>
+          <div class="track-time">0:00</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Quiet details ── -->
+  <section class="sec-std">
+    <div class="wrap">
+      <h2 class="sec-h2">The quiet details.</h2>
+      <div class="quiet-items">
+        <div class="quiet-item">
+          <h3 class="quiet-item-title">Setup.</h3>
+          <p class="quiet-item-body">Minutes, not days. Share your brand details, upload photographs. The engine does the rest.</p>
+        </div>
+        <div class="quiet-item">
+          <h3 class="quiet-item-title">Control.</h3>
+          <p class="quiet-item-body">You review every playlist before it plays. Swap any track. Approve when it sounds right.</p>
+        </div>
+        <div class="quiet-item">
+          <h3 class="quiet-item-title">Licensing.</h3>
+          <p class="quiet-item-body">Every track is royalty-free and cleared for public performance. No PRO filings, no surprises.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Final CTA ── -->
+  <section class="sec-std" id="start">
+    <div class="wrap">
+      <div class="cta-block">
+        <div class="cta-wm-bg" aria-hidden="true">
+          <img src="/static/brandbeat-wordmark.png" alt="">
+        </div>
+        <div class="cta-content">
+          <h2 class="cta-heading">
+            Start with a brief. <em class="accent">End with a playlist.</em>
+          </h2>
+          <div class="cta-btn">
+            <a href="/login" class="btn btn-primary">Start a playlist</a>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section light" id="how">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Generic playlists kill your brand vibe.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Your store’s music is the first thing customers feel. Off-brand music costs attention and sales — on-brand music boosts spending by up to <span style="color:var(--accent);font-weight:700;">40%</span>.</p>
+</main>
 
-      <h3 class="section-title reveal" style="margin-top:60px;animation-delay:0.15s;">Three steps. Minutes, not days.</h3>
-      <div class="steps">
-        <div class="step-card">
-          <div class="step-icon">⬆️</div>
-          <div class="step-label">Step 1</div>
-          <div class="step-title">Share your brand</div>
-          <p>Tell us your vibe, customers, and location. Upload your assets.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-icon">✨</div>
-          <div class="step-label">Step 2</div>
-          <div class="step-title">AI builds your sound</div>
-          <p>We analyze your identity and design an on-brand music profile.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-icon">▶️</div>
-          <div class="step-label">Step 3</div>
-          <div class="step-title">Play on-brand, all day</div>
-          <p>Approve, tweak, and schedule playlists across locations.</p>
-        </div>
+<!-- ── Footer ── -->
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-inner">
+      <div></div>
+      <div class="footer-brand">
+        <span class="wm wm-footer" aria-label="brandbeat">
+          <span class="wm-b">b</span><span class="wm-rest">randbeat</span>
+        </span>
+        <p class="footer-tagline">A sub-brand of Audesy</p>
       </div>
     </div>
-  </section>
+  </div>
+</footer>
 
-  <section class="section soft" id="why">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Built for busy brand owners.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Everything you need to turn brand identity into a signature soundtrack.</p>
-      <div class="cards">
-        <div class="info-card">
-          <div class="icon-box">🧠</div>
-          <div>
-            <h4>Always on-brand</h4>
-            <p>AI-curated to your brand personality — not someone's Spotify taste.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🎵</div>
-          <div>
-            <h4>Royalty-free</h4>
-            <p>20,000+ licensed tracks. Zero copyright headaches.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">⚡</div>
-          <div>
-            <h4>Ready in minutes</h4>
-            <p>Upload, generate, play. No music expertise needed.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🎛️</div>
-          <div>
-            <h4>You're in control</h4>
-            <p>Review, adjust, approve. Nothing plays without your say.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+<script>
+  // Navbar scroll border
+  const navbar = document.getElementById('navbar');
+  window.addEventListener('scroll', () => {
+    navbar.classList.toggle('scrolled', window.scrollY > 4);
+  }, { passive: true });
 
-  <section class="section light">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Brands that sound like themselves.</h2>
-      <div class="brand-strip">
-        <div>Retail</div>
-        <div>Hospitality</div>
-        <div>Wellness</div>
-        <div>Food + Café</div>
-      </div>
-      <div class="metrics">
-        <div class="metric">
-          <h3>500+</h3>
-          <p>Stores using Fabplay</p>
-        </div>
-        <div class="metric">
-          <h3>20K+</h3>
-          <p>Licensed tracks</p>
-        </div>
-        <div class="metric">
-          <h3>1K+</h3>
-          <p>Playlists generated</p>
-        </div>
-      </div>
-      <div class="testimonials">
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"Fabplay completely changed how our stores feel. Customers comment on the music all the time now."</p>
-          <strong>Priya Sharma</strong>
-          <div style="color:var(--muted);font-size:13px;">Brand Manager, Luxe Boutique</div>
-        </div>
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"We went from random playlists to a perfectly curated sound in under 10 minutes. Game changer."</p>
-          <strong>Arjun Mehta</strong>
-          <div style="color:var(--muted);font-size:13px;">Operations Head, Brew &amp; Bean Cafés</div>
-        </div>
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"The AI nailed our brand vibe on the first try. Our lobby music finally matches our identity."</p>
-          <strong>Sneha Kapoor</strong>
-          <div style="color:var(--muted);font-size:13px;">Marketing Director, The Grand Hotels</div>
-        </div>
-      </div>
-    </div>
-  </section>
+  // Audio player
+  const PLAY_SVG  = `<svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>`;
+  const PAUSE_SVG = `<svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg>`;
 
-  <section class="section soft" id="faq">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Questions, answered.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Everything you need to get started fast.</p>
-      <div class="cards">
-        <div class="info-card">
-          <div class="icon-box">💳</div>
-          <div>
-            <h4>Is there a free trial?</h4>
-            <p>Yes. Start free and cancel anytime. No credit card required.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">📍</div>
-          <div>
-            <h4>Can I manage multiple locations?</h4>
-            <p>Absolutely. Create playlists and schedules per store or region.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🛡️</div>
-          <div>
-            <h4>Is the music licensed?</h4>
-            <p>Yes. Fabplay uses fully licensed, royalty-free catalogs.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🔧</div>
-          <div>
-            <h4>Can I tweak the playlists?</h4>
-            <p>Review, adjust, and approve before anything goes live.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+  let activeRow = null;
 
-  <section class="cta">
-    <div class="container">
-      <h2 class="section-title">Ready to hear your brand?</h2>
-      <a class="btn btn-primary" href="/login">Get Your Brand's Sound</a>
-      <div class="hero-note" style="color:var(--muted);">Free. No credit card. No commitment.</div>
-    </div>
-  </section>
+  function fmt(s) {
+    if (!isFinite(s) || s <= 0) return '0:00';
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  }
 
-  <footer class="footer">
-    <div class="container footer-grid">
-      <img src="/static/logo.jpg" alt="Fabplay" style="height:36px;">
-      <div class="footer-links">
-        <a href="/login">About</a>
-        <a href="/login">Contact</a>
-        <a href="/login">Privacy</a>
-        <a href="/login">Terms</a>
-      </div>
-      <div style="font-size:12px;">Part of the HT Media family</div>
-    </div>
-    <div class="footer-note">© 2026 Fabplay. All rights reserved.</div>
-  </footer>
+  function stopRow(row) {
+    const audio = row.querySelector('audio');
+    const btn   = row.querySelector('.play-btn');
+    audio.pause();
+    btn.innerHTML = PLAY_SVG;
+    btn.setAttribute('aria-label', 'Play');
+    setBar(row, 0, 0);
+    activeRow = null;
+  }
+
+  function setBar(row, pct, time) {
+    row.querySelectorAll('.bar-fill').forEach(el => el.style.width = pct + '%');
+    const t = row.querySelector('.track-time');
+    if (t) t.textContent = fmt(time);
+  }
+
+  function toggleTrack(btn) {
+    const row   = btn.closest('.track-row');
+    const audio = row.querySelector('audio');
+    if (!audio.src) audio.src = row.dataset.src;
+    if (activeRow && activeRow !== row) stopRow(activeRow);
+    if (audio.paused) {
+      audio.play().then(() => {
+        btn.innerHTML = PAUSE_SVG;
+        btn.setAttribute('aria-label', 'Pause');
+        activeRow = row;
+      }).catch(() => {});
+    } else {
+      audio.pause();
+      btn.innerHTML = PLAY_SVG;
+      btn.setAttribute('aria-label', 'Play');
+      activeRow = null;
+    }
+  }
+
+  document.querySelectorAll('.track-row').forEach(row => {
+    const audio = row.querySelector('audio');
+    audio.addEventListener('timeupdate', () => {
+      const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+      setBar(row, pct, audio.currentTime);
+    });
+    audio.addEventListener('ended', () => {
+      row.querySelector('.play-btn').innerHTML = PLAY_SVG;
+      row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
+      setBar(row, 0, 0);
+      activeRow = null;
+    });
+  });
+</script>
+
 </body>
 </html>

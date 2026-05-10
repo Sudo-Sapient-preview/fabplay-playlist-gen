@@ -3,116 +3,119 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>fabPLAY — Sign In</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Brandbeat — Sign in</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:      #F9F8F5;
-    --surface: #FFFFFF;
-    --bdr:     #E8E5DE;
-    --text:    #1A1714;
-    --muted:   #6B6560;
-    --faint:   #A09990;
-    --accent:  #C0392B;
-    --accent-h:#A93226;
-    --radius:  10px;
-    --font-body: "Space Grotesk", "Segoe UI", sans-serif;
-    --font-heading: "Fraunces", "Times New Roman", serif;
+    --bone:        #F2EEE5;
+    --black:       #0A0A0A;
+    --penguin-red: #B8451F;
+    --slate:       #5A5550;
+    --bone-tile:   #ECE7DC;
+    --hairline:    #C5BFB5;
+    --pr-hover:    #9C3A1A;
+    --pr-active:   #82301A;
+    --font-display:'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    --font-label:  'Inter Variable', 'Inter', system-ui, sans-serif;
+  }
+
+  html, body {
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
-    font-family: var(--font-body);
-    background: var(--bg);
-    min-height: 100vh;
+    font-family: var(--font-label);
+    background: var(--bone);
+    color: var(--black);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: 40px 24px;
+    gap: 0;
   }
 
-  .login-wrap {
-    width: 100%;
-    max-width: 400px;
+  ::selection { background: var(--penguin-red); color: var(--bone); }
+
+  *:focus-visible {
+    outline: 2px solid var(--penguin-red);
+    outline-offset: 3px;
   }
 
-  .login-logo {
+  /* ── Wordmark ── */
+  .wm-wrap {
     display: flex;
     justify-content: center;
-    margin-bottom: 32px;
+    margin-bottom: 40px;
+    text-decoration: none;
   }
-
-  .login-logo img {
-    height: 48px;
-    width: auto;
-    object-fit: contain;
+  .wm {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1;
+    display: inline-flex;
+    align-items: baseline;
   }
+  .wm-b    { font-size: 48px; color: var(--penguin-red); letter-spacing: -0.05em; margin-right: 3px; line-height: 1; }
+  .wm-rest { font-size: 34px; color: var(--black); letter-spacing: -0.04em; line-height: 1; }
 
+  /* ── Card ── */
   .login-card {
-    background: var(--surface);
-    border: 1px solid var(--bdr);
-    border-radius: var(--radius);
+    width: 100%;
+    max-width: 400px;
+    background: var(--bone);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
     padding: 36px 32px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   }
 
-  /* Tab toggle */
+  /* ── Tab row ── */
   .tab-row {
     display: flex;
-    border: 1px solid var(--bdr);
-    border-radius: 8px;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
     overflow: hidden;
-    margin-bottom: 28px;
+    margin-bottom: 32px;
   }
   .tab-btn {
     flex: 1;
-    padding: 9px 0;
-    font-size: 13px;
-    font-weight: 600;
-    font-family: inherit;
+    padding: 10px 0;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--font-label);
+    letter-spacing: 0.04em;
     border: none;
     background: transparent;
-    color: var(--muted);
+    color: var(--slate);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 120ms ease, color 120ms ease;
   }
   .tab-btn.active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--penguin-red);
+    color: var(--bone);
   }
+  .tab-btn:not(.active):hover { background: var(--bone-tile); }
 
-  .login-title {
-    font-size: 20px;
-    font-weight: 700;
-    font-family: var(--font-heading);
-    color: var(--text);
-    margin-bottom: 4px;
-    text-align: center;
-  }
+  /* ── Field ── */
+  .field { margin-bottom: 18px; }
 
-  .login-sub {
-    font-size: 13px;
-    color: var(--muted);
-    text-align: center;
-    margin-bottom: 28px;
-  }
-
-  .field {
-    margin-bottom: 16px;
-  }
-
-  label {
+  label, .input-label {
     display: block;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--muted);
+    font-family: var(--font-label);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 6px;
+    color: var(--slate);
+    margin-bottom: 8px;
   }
 
   input[type="email"],
@@ -120,88 +123,124 @@
   input[type="text"],
   input[type="tel"] {
     width: 100%;
-    padding: 10px 13px;
-    font-size: 14px;
-    font-family: inherit;
-    border: 1px solid var(--bdr);
-    border-radius: 7px;
-    background: var(--bg);
-    color: var(--text);
+    padding: 12px 16px;
+    font-size: 17px;
+    font-family: var(--font-display);
+    font-weight: 500;
+    color: var(--black);
+    background: var(--bone);
+    border: 1px solid var(--slate);
+    border-radius: 4px;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 120ms ease;
+    -webkit-font-smoothing: antialiased;
+  }
+  input::placeholder { color: var(--slate); opacity: 0.7; }
+  input:focus {
+    outline: 2px solid var(--penguin-red);
+    outline-offset: 1px;
+    border-color: var(--black);
+  }
+  input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .pw-hint {
+    font-family: var(--font-label);
+    font-size: 11px;
+    color: var(--slate);
+    opacity: 0.7;
+    margin-top: 5px;
+    letter-spacing: 0.02em;
   }
 
-  input:focus { border-color: var(--accent); }
-
+  /* ── Submit button ── */
   .btn-submit {
     width: 100%;
-    padding: 11px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    font-family: inherit;
+    padding: 14px;
+    background: var(--penguin-red);
+    color: var(--bone);
+    font-family: var(--font-label);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
     border: none;
-    border-radius: 7px;
+    border-radius: 4px;
     cursor: pointer;
     margin-top: 8px;
-    transition: background 0.15s;
+    transition: background 120ms ease;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
   }
-  .btn-submit:hover:not(:disabled) { background: var(--accent-h); }
-  .btn-submit:disabled { opacity: 0.65; cursor: not-allowed; }
+  .btn-submit:hover:not(:disabled)  { background: var(--pr-hover); }
+  .btn-submit:active:not(:disabled) { background: var(--pr-active); }
+  .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-submit:focus-visible { outline: 2px solid var(--penguin-red); outline-offset: 3px; }
 
+  /* ── Feedback ── */
   .error-box {
-    background: #FEF2F2;
-    border: 1px solid #FECACA;
-    color: #991B1B;
-    border-radius: 7px;
-    padding: 10px 13px;
-    font-size: 13px;
-    margin-bottom: 16px;
+    background: var(--bone-tile);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--penguin-red);
+    color: var(--black);
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.5;
+    margin-bottom: 20px;
   }
-
   .success-box {
-    background: #F0FDF4;
-    border: 1px solid #BBF7D0;
-    color: #166534;
-    border-radius: 7px;
-    padding: 10px 13px;
-    font-size: 13px;
-    margin-bottom: 16px;
+    background: var(--bone-tile);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--slate);
+    color: var(--black);
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.5;
+    margin-bottom: 20px;
     text-align: center;
   }
 
+  /* ── Spinner ── */
   .spinner {
-    width: 16px; height: 16px;
-    border: 2px solid rgba(255,255,255,0.4);
-    border-top-color: #fff;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(242,238,229,0.4);
+    border-top-color: var(--bone);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── Footer ── */
   .login-footer {
+    margin-top: 28px;
     text-align: center;
-    font-size: 12px;
-    color: var(--faint);
-    margin-top: 20px;
-  }
-
-  .pw-hint {
+    font-family: var(--font-label);
     font-size: 11px;
-    color: var(--faint);
-    margin-top: 4px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--slate);
+    opacity: 0.7;
   }
-
+  .login-footer a {
+    color: var(--black);
+    text-decoration: underline;
+    text-underline-offset: 0.3em;
+    text-decoration-thickness: 1px;
+  }
+  .login-footer a:hover { color: var(--penguin-red); }
 </style>
 </head>
 <body>
 
-<div class="login-wrap" x-data="{
+<div x-data="{
   mode: 'signin',
   email: '',
   password: '',
@@ -218,7 +257,6 @@
     localStorage.removeItem('fabplay_refresh');
     localStorage.removeItem('fabplay_user');
     document.cookie = 'fabplay_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-
   },
 
   async getConfig() {
@@ -237,7 +275,7 @@
 
   async signin() {
     if (!this.email || !this.password) {
-      this.error = 'Please enter your email and password.';
+      this.error = 'Enter your email and password.';
       return;
     }
     this.loading = true;
@@ -251,7 +289,7 @@
       });
       const data = await r.json();
       if (!r.ok) {
-        this.error = data.error_description || data.msg || 'Invalid email or password.';
+        this.error = data.error_description || data.msg || 'Incorrect email or password.';
         return;
       }
       localStorage.setItem('fabplay_token',  data.access_token);
@@ -260,7 +298,7 @@
       document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
       window.location.href = '/dashboard';
     } catch(e) {
-      this.error = 'Connection error. Please try again.';
+      this.error = 'Connection error. Try again in a moment.';
     } finally {
       this.loading = false;
     }
@@ -299,7 +337,7 @@
       });
       const data = await r.json();
       if (!r.ok) {
-        this.error = data.error || 'Sign up failed. Please try again.';
+        this.error = data.error || 'Sign-up failed. Try again.';
         return;
       }
       localStorage.setItem('fabplay_token',  data.access_token);
@@ -308,30 +346,28 @@
       document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
       window.location.href = '/dashboard';
     } catch(e) {
-      this.error = 'Connection error. Please try again.';
+      this.error = 'Connection error. Try again in a moment.';
     } finally {
       this.loading = false;
     }
   }
 }" x-init="init()">
 
-  <div class="login-logo">
-    <img src="/static/logo.jpg" alt="fabPLAY">
-  </div>
+  <a href="/" class="wm-wrap" aria-label="Brandbeat home">
+    <span class="wm"><span class="wm-b">b</span><span class="wm-rest">randbeat</span></span>
+  </a>
 
   <div class="login-card">
 
-    <!-- Tab Toggle -->
     <div class="tab-row">
-      <button class="tab-btn" :class="mode==='signup'?'active':''" @click="switchMode('signup')">Create Account</button>
-      <button class="tab-btn" :class="mode==='signin'?'active':''" @click="switchMode('signin')">Sign In</button>
+      <button class="tab-btn" :class="mode==='signup'?'active':''" @click="switchMode('signup')">Create account</button>
+      <button class="tab-btn" :class="mode==='signin'?'active':''" @click="switchMode('signin')">Sign in</button>
     </div>
 
-    <!-- Error / Success -->
     <div x-show="error" class="error-box" x-text="error"></div>
     <div x-show="success" class="success-box" x-text="success"></div>
 
-    <!-- ── Sign In Form ── -->
+    <!-- Sign in -->
     <form x-show="mode==='signin'" @submit.prevent="signin()">
       <div class="field">
         <label for="si-email">Email</label>
@@ -339,46 +375,47 @@
       </div>
       <div class="field">
         <label for="si-password">Password</label>
-        <input id="si-password" type="password" x-model="password" placeholder="••••••••" autocomplete="current-password" :disabled="loading">
+        <input id="si-password" type="password" x-model="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password" :disabled="loading">
       </div>
       <button type="submit" class="btn-submit" :disabled="loading">
         <span x-show="loading" class="spinner"></span>
-        <span x-text="loading ? 'Signing in…' : 'Sign In'"></span>
+        <span x-text="loading ? 'Signing in…' : 'Sign in'"></span>
       </button>
     </form>
 
-    <!-- ── Sign Up Form ── -->
+    <!-- Sign up -->
     <form x-show="mode==='signup'" @submit.prevent="signup()">
       <div class="field">
-        <label for="su-name">Full Name</label>
+        <label for="su-name">Full name</label>
         <input id="su-name" type="text" x-model="fullName" placeholder="Raj Sharma" autocomplete="name" :disabled="loading">
       </div>
       <div class="field">
-        <label for="su-email">Email <span style="color:var(--accent)">*</span></label>
+        <label for="su-email">Email <span style="color:var(--penguin-red)">*</span></label>
         <input id="su-email" type="email" x-model="email" placeholder="you@example.com" autocomplete="email" :disabled="loading" required>
       </div>
       <div class="field">
-        <label for="su-phone">Phone Number <span style="color:var(--accent)">*</span></label>
+        <label for="su-phone">Phone number <span style="color:var(--penguin-red)">*</span></label>
         <input id="su-phone" type="tel" x-model="phone" placeholder="+91 XXXXX XXXXX" autocomplete="tel" :disabled="loading" required>
       </div>
       <div class="field">
         <label for="su-password">Password</label>
-        <input id="su-password" type="password" x-model="password" placeholder="••••••••" autocomplete="new-password" :disabled="loading">
-        <div class="pw-hint">Minimum 6 characters</div>
+        <input id="su-password" type="password" x-model="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password" :disabled="loading">
+        <p class="pw-hint">Minimum 6 characters</p>
       </div>
       <div class="field">
-        <label for="su-confirm">Confirm Password</label>
-        <input id="su-confirm" type="password" x-model="confirmPassword" placeholder="••••••••" autocomplete="new-password" :disabled="loading">
+        <label for="su-confirm">Confirm password</label>
+        <input id="su-confirm" type="password" x-model="confirmPassword" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password" :disabled="loading">
       </div>
       <button type="submit" class="btn-submit" :disabled="loading">
         <span x-show="loading" class="spinner"></span>
-        <span x-text="loading ? 'Creating account…' : 'Create Account'"></span>
+        <span x-text="loading ? 'Creating account…' : 'Create account'"></span>
       </button>
     </form>
 
   </div>
 
-  <div class="login-footer">fabPLAY Brand Intelligence</div>
+  <p class="login-footer">Brandbeat &middot; <a href="/">By Audesy</a></p>
+
 </div>
 
 </body>

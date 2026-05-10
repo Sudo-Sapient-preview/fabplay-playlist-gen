@@ -1,4 +1,4 @@
-/* ══════════ fabPLAY UI v2 — App Logic ══════════ */
+/* ══════════ Brandbeat — App Logic ══════════ */
 function app() {
 return {
   page: '',
@@ -40,7 +40,11 @@ return {
   sbInterval: null,
   sbCharts: {radar:null, timeline:null, radarLg:null},
   sbGenreOverrides: {include:[], exclude:[]},
+  sbArtistOverrides: {include:[], exclude:[]},
+  sbSongTypeFilter: null,
   sbShowAddGenre: false,
+  catalogArtists: [],
+  catalogArtistsLoaded: false,
   hasUnsavedChanges: false,
   sbAcousticDirty: false,
   sbGenreDirty: false,
@@ -79,7 +83,7 @@ return {
   plGenreFilter: '',
   plLoading: false,
 
-  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''},
+  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,song_type_filter:null,music_notes:''},
 
   cats: [
     {v:'fashion_footwear',l:'👗 Fashion & Footwear'},
@@ -146,7 +150,7 @@ return {
     this.loading = false;
 
     // Load non-critical data in background after UI is shown
-    Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres()]);
+    Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres(), this.loadCatalogArtists()]);
 
     this.$watch('page', async val => {
       if(val==='soundboard'){
@@ -236,6 +240,9 @@ return {
     this.activeDp=0;
     const saved=localStorage.getItem('sbGenreOverrides_'+id);
     this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
+    const savedArtists=localStorage.getItem('sbArtistOverrides_'+id);
+    this.sbArtistOverrides=savedArtists?JSON.parse(savedArtists):{include:[],exclude:[]};
+    this.sbSongTypeFilter=localStorage.getItem('sbSongTypeFilter_'+id)||null;
     this._origTargets={};
     this._origRanges={};
     this.hasUnsavedChanges=false;
@@ -274,6 +281,46 @@ return {
   _saveGenreOverrides(){
     if(this.curBrand?.id)
       localStorage.setItem('sbGenreOverrides_'+this.curBrand.id, JSON.stringify(this.sbGenreOverrides));
+  },
+  _saveSbSongTypeFilter(){
+    if(this.curBrand?.id)
+      localStorage.setItem('sbSongTypeFilter_'+this.curBrand.id, this.sbSongTypeFilter||'');
+  },
+  toggleSbSongType(type){
+    this.sbSongTypeFilter=this.sbSongTypeFilter===type?null:type;
+    this._saveSbSongTypeFilter();
+    this.sbGenreDirty=true;
+  },
+  async loadCatalogArtists(){
+    if(this.catalogArtistsLoaded)return;
+    try{
+      const r=await this.apiFetch('/api/catalog/artists');
+      if(r&&r.ok){
+        const d=await r.json();
+        this.catalogArtists=(d.artists||[]).filter(Boolean).sort();
+        this.catalogArtistsLoaded=true;
+      }
+    }catch(e){}
+  },
+  _saveArtistOverrides(){
+    if(this.curBrand?.id)
+      localStorage.setItem('sbArtistOverrides_'+this.curBrand.id, JSON.stringify(this.sbArtistOverrides));
+  },
+  sbArtistIncluded(a){
+    if(this.sbArtistOverrides.exclude.includes(a))return false;
+    if(this.sbArtistOverrides.include.includes(a))return true;
+    return(this.curBrand?.include_artists||[]).includes(a);
+  },
+  sbArtistExcluded(a){
+    if(this.sbArtistOverrides.include.includes(a))return false;
+    return(this.curBrand?.exclude_artists||[]).includes(a)||this.sbArtistOverrides.exclude.includes(a);
+  },
+  toggleSbArtist(a){
+    this.sbGenreDirty=true;
+    const inc=this.sbArtistOverrides.include;const exc=this.sbArtistOverrides.exclude;
+    if(this.sbArtistExcluded(a)){this.sbArtistOverrides.exclude=exc.filter(x=>x!==a);this._saveArtistOverrides();return;}
+    if(this.sbArtistIncluded(a)){this.sbArtistOverrides.include=inc.filter(x=>x!==a);this.sbArtistOverrides.exclude=[...exc,a];this._saveArtistOverrides();return;}
+    this.sbArtistOverrides.include=[...inc,a];this._saveArtistOverrides();
   },
 
   // ── File upload ────────────────────────────
@@ -314,8 +361,9 @@ return {
       if(!this.form.visitor_activity.length)this.form.visitor_activity=[...this.suggestions.activities];
       if(!this.form.customer_types.length)this.form.customer_types=[...this.suggestions.customer_types];
       if(!this.form.lifestyle_tags.length)this.form.lifestyle_tags=[...this.suggestions.lifestyle];
-      // Ensure DB-backed genres are ready by the time user reaches the genre step.
+      // Ensure DB-backed genres and artists are ready by the time user reaches the genre step.
       if(!this.catalogGenresLoaded) await this.loadCatalogGenres();
+      if(!this.catalogArtistsLoaded) await this.loadCatalogArtists();
       this.createStep++;
     }catch(e){
       alert('Could not analyze brand details right now. Please try again.');
@@ -380,7 +428,7 @@ return {
 
   _resetForm(){
     this.createStep=0;
-    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''};
+    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,song_type_filter:null,music_notes:''};
     this.suggestions={activities:[],lifestyle:[],customer_types:[]};
     this.uploadedFiles=[];
     this.assetAnalysis='';
@@ -452,14 +500,19 @@ return {
       const p=this.curBrand.brand_profile;
       profileReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})});
     }
-    // Merge soundboard genre overrides into the brand's permanent include/exclude lists
-    if(this.sbGenreOverrides.include.length||this.sbGenreOverrides.exclude.length){
+    // Merge soundboard genre/artist overrides + song type filter into the brand's permanent settings
+    if(this.sbGenreOverrides.include.length||this.sbGenreOverrides.exclude.length||this.sbArtistOverrides.include.length||this.sbArtistOverrides.exclude.length||this.sbGenreDirty){
       const baseInc=this.curBrand?.include_genres||[];
       const baseExc=this.curBrand?.exclude_genres||[];
-      // Overrides take precedence: genres in override.include are removed from exclude list and vice versa
       const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
       const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
-      genreReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc})});
+      genreReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,song_type_filter:this.sbSongTypeFilter||null})});
+      const baseIncA=this.curBrand?.include_artists||[];
+      const baseExcA=this.curBrand?.exclude_artists||[];
+      const newIncA=[...new Set([...baseIncA.filter(a=>!this.sbArtistOverrides.exclude.includes(a)),...this.sbArtistOverrides.include])];
+      const newExcA=[...new Set([...baseExcA.filter(a=>!this.sbArtistOverrides.include.includes(a)),...this.sbArtistOverrides.exclude])];
+      const artistReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/artists',{method:'PUT',body:JSON.stringify({include_artists:newIncA,exclude_artists:newExcA})});
+      const _origGenreReq=genreReq;genreReq=async()=>{await _origGenreReq();await artistReq();};
     }
     // Clear debounce timers and mark as saved immediately — saves run in background
     if(this._sbSaveTimer){clearTimeout(this._sbSaveTimer);this._sbSaveTimer=null;}
@@ -477,7 +530,7 @@ return {
         if(latest)this.curBrand=latest;
       }
       // Overrides are now merged into the brand — clear the transient state
-      if(genreReq){this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();}
+      if(genreReq){this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();this.sbArtistOverrides={include:[],exclude:[]};this._saveArtistOverrides();}
       this.hasUnsavedChanges=false;
       this.profileDirty=false;
       this.scheduleSbChartsInit();
@@ -507,7 +560,7 @@ return {
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
     try{
-      const body={genre_overrides:this.sbGenreOverrides};
+      const body={genre_overrides:this.sbGenreOverrides,artist_overrides:this.sbArtistOverrides,song_type_filter:this.sbSongTypeFilter||null};
       if(playlistName)body.playlist_name=playlistName;
       const r=await this.apiFetch('/api/generate/'+id,{method:'POST',body:JSON.stringify(body)});
       if(!r||!r.ok)throw new Error('Server returned '+(r?.status||'error'));
@@ -545,6 +598,9 @@ return {
     if(!this.curBrand)return;
     const saved=localStorage.getItem('sbGenreOverrides_'+this.curBrand.id);
     this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
+    const savedArtists=localStorage.getItem('sbArtistOverrides_'+this.curBrand.id);
+    this.sbArtistOverrides=savedArtists?JSON.parse(savedArtists):{include:[],exclude:[]};
+    this.sbSongTypeFilter=localStorage.getItem('sbSongTypeFilter_'+this.curBrand.id)||null;
     this._origTargets={};this._origRanges={};
     this.hasUnsavedChanges=false;this.sbAcousticDirty=false;this.sbGenreDirty=false;
     this.sbTimelineDirty=false;this.sbProfileDirty=false;this.profileDirty=false;
@@ -756,11 +812,17 @@ return {
     const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
     const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
     try{
-      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc})});
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,song_type_filter:this.sbSongTypeFilter||null})});
+      const baseIncA=this.curBrand?.include_artists||[];
+      const baseExcA=this.curBrand?.exclude_artists||[];
+      const newIncA=[...new Set([...baseIncA.filter(a=>!this.sbArtistOverrides.exclude.includes(a)),...this.sbArtistOverrides.include])];
+      const newExcA=[...new Set([...baseExcA.filter(a=>!this.sbArtistOverrides.include.includes(a)),...this.sbArtistOverrides.exclude])];
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/artists',{method:'PUT',body:JSON.stringify({include_artists:newIncA,exclude_artists:newExcA})});
       await this.loadBrands();
       const latest=this.brands.find(x=>x.id===this.curBrand.id);
       if(latest)this.curBrand=latest;
       this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();
+      this.sbArtistOverrides={include:[],exclude:[]};this._saveArtistOverrides();
       this.sbGenreDirty=false;
       this.sbNeedsGeneration=true;
     }catch(e){alert('Could not save genre changes. Please try again.');}
@@ -951,7 +1013,7 @@ return {
       const x=cx + r*Math.cos(a), y=cy + r*Math.sin(a);
       ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(x,y); ctx.stroke();
       const lx=cx + (r+14)*Math.cos(a), ly=cy + (r+14)*Math.sin(a);
-      ctx.font=large?'12px \"Space Grotesk\", sans-serif':'10px \"Space Grotesk\", sans-serif';
+      ctx.font=large?'12px \"Inter\", sans-serif':'10px \"Inter\", sans-serif';
       ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.fillText(labels[i], lx, ly);
     }
@@ -1019,7 +1081,7 @@ return {
                   angleLines:{color:'rgba(148,163,184,0.32)'},
                   pointLabels:{
                     color:'#6B7280',
-                    font:{size:11,family:'Space Grotesk, sans-serif',weight:'600'}
+                    font:{size:11,family:'Inter, sans-serif',weight:'600'}
                   }
                 }
               },

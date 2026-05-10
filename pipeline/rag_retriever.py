@@ -66,9 +66,10 @@ def _apply_hard_filters(
       ✗ valence  outside [valence_min ± relax, valence_max ± relax]
       ✗ explicit proxy (when filter_explicit=True)
     """
-    exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
-    exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
-    filter_explicit = inputs.get("filter_explicit", True)
+    exclude_artists  = _normalise_list(inputs.get("exclude_artists", ""))
+    exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
+    filter_explicit  = inputs.get("filter_explicit", True)
+    song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
 
     tempo_min  = day_part.get("tempo_min",  60)
     tempo_max  = day_part.get("tempo_max", 180)
@@ -97,6 +98,10 @@ def _apply_hard_filters(
             continue
         if filter_explicit and _is_explicit_proxy(track):
             continue
+        if song_type_filter:
+            track_type = (track.get("song_type") or "").strip().lower()
+            if track_type and track_type != song_type_filter:
+                continue
 
         filtered.append(track)
 
@@ -111,9 +116,10 @@ def _apply_exclusion_filters_only(
     Fallback filter: only apply artist/genre exclusions and explicit proxy.
     No energy/valence/tempo bounds — used when hard filters leave 0 candidates.
     """
-    exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
-    exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
-    filter_explicit = inputs.get("filter_explicit", True)
+    exclude_artists  = _normalise_list(inputs.get("exclude_artists", ""))
+    exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
+    filter_explicit  = inputs.get("filter_explicit", True)
+    song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
 
     filtered = []
     for track in candidates:
@@ -125,6 +131,10 @@ def _apply_exclusion_filters_only(
             continue
         if filter_explicit and _is_explicit_proxy(track):
             continue
+        if song_type_filter:
+            track_type = (track.get("song_type") or "").strip().lower()
+            if track_type and track_type != song_type_filter:
+                continue
         filtered.append(track)
 
     return filtered

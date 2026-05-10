@@ -171,10 +171,9 @@ def _resolve_track_src(track: dict) -> str:
     return f"/songs/{rel}"
 
 
-# ─── Persistence (JSON files) ─────────────────────────────────────────────────
+# ─── Persistence ──────────────────────────────────────────────────────────────
 
-BRANDS_FILE    = Path("data/brands_store.json")
-PLAYLISTS_FILE = Path("data/playlists_store.json")
+BRANDS_FILE = Path("data/brands_store.json")
 
 
 def _load(path: Path, default):
@@ -191,10 +190,96 @@ def _save(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def get_brands()    -> dict: return _load(BRANDS_FILE,    {})
-def get_playlists() -> dict: return _load(PLAYLISTS_FILE, {})
-def save_brands(b):    _save(BRANDS_FILE,    b)
-def save_playlists(p): _save(PLAYLISTS_FILE, p)
+def get_brands()  -> dict: return _load(BRANDS_FILE, {})
+def save_brands(b): _save(BRANDS_FILE, b)
+
+
+# ─── Supabase playlist helpers ────────────────────────────────────────────────
+
+def _get_playlist_db(brand_id: str) -> Optional[dict]:
+    """Read a single brand's playlist from Supabase."""
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_json") \
+            .eq("brand_id", brand_id) \
+            .maybe_single() \
+            .execute()
+        if r and r.data:
+            raw = r.data["playlist_json"]
+            return json.loads(raw) if isinstance(raw, str) else raw
+    except Exception as e:
+        logger.warning("_get_playlist_db failed for %s: %s", brand_id, e)
+    return None
+
+
+def _save_playlist_db(brand_id: str, user_id: str, playlist_json: dict):
+    """Upsert a brand's playlist to Supabase."""
+    get_supabase().table("brand_playlists").upsert(
+        {
+            "brand_id":      brand_id,
+            "user_id":       user_id,
+            "playlist_json": playlist_json,
+            "updated_at":    datetime.now(timezone.utc).isoformat(),
+        },
+        on_conflict="brand_id",
+    ).execute()
+
+
+def _delete_playlist_db(brand_id: str):
+    """Delete a brand's playlist from Supabase."""
+    try:
+        get_supabase().table("brand_playlists").delete().eq("brand_id", brand_id).execute()
+    except Exception as e:
+        logger.warning("_delete_playlist_db failed for %s: %s", brand_id, e)
+
+
+def _get_all_playlists_db() -> list[dict]:
+    """Fetch all playlists from Supabase (used for stats)."""
+    try:
+        r = get_supabase().table("brand_playlists").select("playlist_json").execute()
+        result = []
+        for row in (r.data or []):
+            raw = row.get("playlist_json")
+            if raw:
+                result.append(json.loads(raw) if isinstance(raw, str) else raw)
+        return result
+    except Exception as e:
+        logger.warning("_get_all_playlists_db failed: %s", e)
+        return []
+
+
+# ─── Brand helpers ────────────────────────────────────────────────────────────
+
+def _reconcile_playlist_counts(uid: str, brands: list[dict]) -> list[dict]:
+    """
+    Ensures playlist_count reflects what's actually in Supabase brand_playlists.
+    If the local JSON is stale (count=0 but a playlist row exists), corrects it
+    in memory and writes the fix back to disk so future reads are already right.
+    """
+    if not brands:
+        return brands
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("brand_id") \
+            .eq("user_id", uid) \
+            .execute()
+        ids_with_playlist = {row["brand_id"] for row in (r.data or [])}
+    except Exception as e:
+        logger.warning("_reconcile_playlist_counts: supabase query failed: %s", e)
+        return brands
+
+    needs_save = False
+    all_brands = get_brands()
+    for b in brands:
+        bid = b["id"]
+        if bid in ids_with_playlist and (b.get("playlist_count") or 0) == 0:
+            b["playlist_count"] = 1
+            if bid in all_brands:
+                all_brands[bid]["playlist_count"] = 1
+                needs_save = True
+    if needs_save:
+        save_brands(all_brands)
+    return brands
 
 
 # ─── Activity log ─────────────────────────────────────────────────────────────
@@ -372,6 +457,7 @@ def _pipeline_inputs(brand: dict) -> dict:
         "include_artists":      _as_str(inc_artists),
         "exclude_artists":      _as_str(exc_artists),
         "filter_explicit":      brand.get("filter_explicit", True),
+        "song_type_filter":     brand.get("song_type_filter") or None,
         "music_notes":          brand.get("music_notes", ""),
         "asset_analysis":       brand.get("asset_analysis", ""),
         "has_brand_guidelines": brand.get("has_brand_guidelines", False),
@@ -534,7 +620,7 @@ def _bg_soundboard(brand_id: str, tid: str):
 
 # ─── Background: Playlist generation (MMR) ───────────────────────────────────
 
-def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None):
+def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None, song_type_filter: Optional[str] = None, artist_overrides: Optional[dict] = None):
     try:
         brands = get_brands()
         brand  = brands.get(brand_id)
@@ -555,6 +641,19 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             merged_exc = list(dict.fromkeys(stored_exc + ov_exc))
             inputs["include_genres"] = ", ".join(merged_inc)
             inputs["exclude_genres"] = ", ".join(merged_exc)
+            return inputs
+
+        def _apply_artist_overrides(inputs: dict) -> dict:
+            if not artist_overrides:
+                return inputs
+            ov_inc = artist_overrides.get("include", [])
+            ov_exc = artist_overrides.get("exclude", [])
+            stored_inc = [a.strip() for a in (inputs.get("include_artists") or "").split(",") if a.strip()]
+            stored_exc = [a.strip() for a in (inputs.get("exclude_artists") or "").split(",") if a.strip()]
+            merged_inc = [a for a in dict.fromkeys(stored_inc + ov_inc) if a not in ov_exc]
+            merged_exc = list(dict.fromkeys(stored_exc + ov_exc))
+            inputs["include_artists"] = ", ".join(merged_inc)
+            inputs["exclude_artists"] = ", ".join(merged_exc)
             return inputs
 
         if not bp or not sb_result:
@@ -578,7 +677,10 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             save_brands(brands)
 
         task_progress(tid, 30, "Starting MMR selection...")
-        inputs    = _apply_genre_overrides(_pipeline_inputs(brand))
+        inputs    = _apply_artist_overrides(_apply_genre_overrides(_pipeline_inputs(brand)))
+        # Request-level song_type_filter overrides the brand-level default
+        if song_type_filter:
+            inputs["song_type_filter"] = song_type_filter.strip().lower()
         day_parts = sb_result.get("day_parts", [])
 
         include_list       = [a.strip() for a in (inputs.get("include_artists") or "").split(",") if a.strip()]
@@ -692,27 +794,12 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             "day_parts": assembled,
         }
 
-        playlists = get_playlists()
-        playlists[brand_id] = playlist_result
-        save_playlists(playlists)
-
         user_id = brand.get("user_id")
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # ── Persist full playlist JSON to Supabase (survives backend restarts) ─
-        try:
-            get_supabase().table("brand_playlists").upsert(
-                {
-                    "brand_id":     brand_id,
-                    "user_id":      user_id,
-                    "playlist_json": playlist_result,
-                    "updated_at":   now_iso,
-                },
-                on_conflict="brand_id",
-            ).execute()
-            logger.info("Playlist saved to brand_playlists (brand=%s)", brand_id)
-        except Exception as e:
-            logger.warning("Could not save playlist to brand_playlists: %s", e)
+        # ── Save playlist to Supabase ─────────────────────────────────────────
+        _save_playlist_db(brand_id, user_id, playlist_result)
+        logger.info("Playlist saved to brand_playlists (brand=%s)", brand_id)
 
         # ── Sync flat song list to user_playlist_songs ─────────────────────────
         if user_id:
@@ -728,6 +815,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                         .delete().eq("user_id", user_id).eq("brand_id", brand_id).execute()
                     rows = [
                         {"user_id": user_id, "brand_id": brand_id,
+                         "brand_name": brand.get("brand_name", ""),
                          "song_id": sid, "song_name": name, "generated_at": now_iso}
                         for sid, name in unique_songs.items()
                     ]
@@ -786,19 +874,19 @@ def debug_search():
 
 @protected_router.get("/api/stats")
 def stats():
-    brands    = get_brands()
-    playlists = get_playlists()
-    active    = sum(1 for b in brands.values() if b.get("status") == "active")
-    mmr_vals  = [
+    brands   = get_brands()
+    active   = sum(1 for b in brands.values() if b.get("status") == "active")
+    all_pls  = _get_all_playlists_db()
+    mmr_vals = [
         dp["avg_bfs"]
-        for pl in playlists.values()
+        for pl in all_pls
         for dp in pl.get("day_parts", [])
         if dp.get("avg_bfs", 0) > 0
     ]
     return {
         "total_brands":         len(brands),
         "active_sound_boards":  active,
-        "playlists_this_month": len(playlists),
+        "playlists_this_month": len(all_pls),
         "avg_bfs":              round(sum(mmr_vals) / len(mmr_vals), 3) if mmr_vals else 0.0,
     }
 
@@ -813,7 +901,8 @@ def activity():
 @protected_router.get("/api/brands")
 def list_brands(user: dict = Depends(get_current_user)):
     uid = user["id"]
-    return [b for b in get_brands().values() if b.get("user_id") == uid]
+    brands = [b for b in get_brands().values() if b.get("user_id") == uid]
+    return _reconcile_playlist_counts(uid, brands)
 
 
 @protected_router.post("/api/brands")
@@ -844,6 +933,7 @@ async def create_brand(req: Request, user: dict = Depends(get_current_user)):
         "include_artists":      data.get("include_artists", []),
         "exclude_artists":      data.get("exclude_artists", []),
         "filter_explicit":      data.get("filter_explicit", True),
+        "song_type_filter":     data.get("song_type_filter") or None,
         "music_notes":          data.get("music_notes", ""),
         "asset_analysis":       data.get("asset_analysis", ""),
         "has_brand_guidelines": data.get("has_brand_guidelines", False),
@@ -871,9 +961,7 @@ def delete_brand(brand_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(403, "Not your brand")
     name = brands.pop(brand_id)["brand_name"]
     save_brands(brands)
-    playlists = get_playlists()
-    playlists.pop(brand_id, None)
-    save_playlists(playlists)
+    _delete_playlist_db(brand_id)
     log_activity("Brand deleted", name)
     return {"ok": True}
 
@@ -1082,6 +1170,18 @@ def catalog_genres():
         return {"genres": [], "error": str(e)}
 
 
+@protected_router.get("/api/catalog/artists")
+def catalog_artists():
+    """Return distinct non-empty artists present in the songs catalog, sorted alphabetically."""
+    try:
+        from backend.db import fetch_all_songs as _fetch
+        songs = _fetch()
+        artists = sorted({s.get("artist") for s in songs if s.get("artist")})
+        return {"artists": artists}
+    except Exception as e:
+        return {"artists": [], "error": str(e)}
+
+
 @protected_router.get("/api/catalog/stats")
 def catalog_stats():
     try:
@@ -1178,17 +1278,23 @@ class GenreOverrides(BaseModel):
     include: list[str] = []
     exclude: list[str] = []
 
+class ArtistOverrides(BaseModel):
+    include: list[str] = []
+    exclude: list[str] = []
+
 class GenerateRequest(BaseModel):
     genre_overrides: GenreOverrides = GenreOverrides()
+    artist_overrides: ArtistOverrides = ArtistOverrides()
     playlist_name: Optional[str] = None
+    song_type_filter: Optional[str] = None
 
 @protected_router.post("/api/generate/{brand_id}")
 def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest()):
     if brand_id not in get_brands():
         raise HTTPException(404, "Brand not found")
     tid = new_task()
-    logger.warning("generate called: brand=%s genre_overrides=%s", brand_id, req.genre_overrides.model_dump())
-    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump(), req.playlist_name), daemon=True).start()
+    logger.warning("generate called: brand=%s genre_overrides=%s artist_overrides=%s", brand_id, req.genre_overrides.model_dump(), req.artist_overrides.model_dump())
+    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump(), req.playlist_name, req.song_type_filter, req.artist_overrides.model_dump()), daemon=True).start()
     return {"task_id": tid}
 
 
@@ -1308,6 +1414,23 @@ async def update_genres(brand_id: str, req: Request, user: dict = Depends(get_cu
     exclude_genres = data.get("exclude_genres", [])
     brands[brand_id]["include_genres"] = include_genres
     brands[brand_id]["exclude_genres"] = exclude_genres
+    if "song_type_filter" in data:
+        brands[brand_id]["song_type_filter"] = data.get("song_type_filter") or None
+    brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()
+    save_brands(brands)
+    return {"ok": True}
+
+
+@protected_router.put("/api/brands/{brand_id}/artists")
+async def update_artists(brand_id: str, req: Request, user: dict = Depends(get_current_user)):
+    brands = get_brands()
+    if brand_id not in brands:
+        raise HTTPException(404, "Brand not found")
+    if brands[brand_id].get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your brand")
+    data = await req.json()
+    brands[brand_id]["include_artists"] = data.get("include_artists", [])
+    brands[brand_id]["exclude_artists"] = data.get("exclude_artists", [])
     brands[brand_id]["last_updated"] = datetime.now(timezone.utc).isoformat()
     save_brands(brands)
     return {"ok": True}
@@ -1326,7 +1449,7 @@ def _recalc_daypart_stats(dp: dict) -> dict:
     return dp
 
 
-def _sync_playlist_songs(brand_id: str, user_id: str, day_parts: list) -> None:
+def _sync_playlist_songs(brand_id: str, user_id: str, day_parts: list, brand_name: str = "") -> None:
     unique_songs: dict[str, str] = {}
     for dp_r in day_parts:
         for track in dp_r.get("tracks", []):
@@ -1338,6 +1461,7 @@ def _sync_playlist_songs(brand_id: str, user_id: str, day_parts: list) -> None:
         .delete().eq("user_id", user_id).eq("brand_id", brand_id).execute()
     if unique_songs:
         rows = [{"user_id": user_id, "brand_id": brand_id,
+                 "brand_name": brand_name,
                  "song_id": sid, "song_name": name, "generated_at": now_iso}
                 for sid, name in unique_songs.items()]
         get_supabase().table("user_playlist_songs").insert(rows).execute()
@@ -1350,15 +1474,14 @@ async def remove_tracks(brand_id: str, req: Request, user: dict = Depends(get_cu
         raise HTTPException(404, "Brand not found")
     if brands[brand_id].get("user_id") != user["id"]:
         raise HTTPException(403, "Not your brand")
-    playlists = get_playlists()
-    if brand_id not in playlists:
+    pl = _get_playlist_db(brand_id)
+    if not pl:
         raise HTTPException(404, "No playlist found")
     data = await req.json()
     dp_idx: int = data.get("day_part_index", -1)
     song_ids: list = data.get("song_ids", [])
     if not song_ids:
         raise HTTPException(400, "No song_ids provided")
-    pl = playlists[brand_id]
     day_parts = pl.get("day_parts", [])
     if dp_idx < 0 or dp_idx >= len(day_parts):
         raise HTTPException(400, "Invalid day_part_index")
@@ -1366,17 +1489,12 @@ async def remove_tracks(brand_id: str, req: Request, user: dict = Depends(get_cu
     remove_set = set(song_ids)
     dp["tracks"] = [t for t in dp.get("tracks", []) if t.get("song_id") not in remove_set]
     _recalc_daypart_stats(dp)
-    save_playlists(playlists)
     try:
-        _sync_playlist_songs(brand_id, user["id"], day_parts)
+        _sync_playlist_songs(brand_id, user["id"], day_parts, brands[brand_id].get("brand_name", ""))
     except Exception as e:
         logger.warning("Supabase sync failed after track removal: %s", e)
     try:
-        get_supabase().table("brand_playlists").upsert(
-            {"brand_id": brand_id, "user_id": user["id"],
-             "playlist_json": pl, "updated_at": datetime.now(timezone.utc).isoformat()},
-            on_conflict="brand_id",
-        ).execute()
+        _save_playlist_db(brand_id, user["id"], pl)
     except Exception as e:
         logger.warning("brand_playlists upsert failed after track removal: %s", e)
     # Re-resolve src for returned tracks
@@ -1392,15 +1510,14 @@ async def replace_track(brand_id: str, req: Request, user: dict = Depends(get_cu
         raise HTTPException(404, "Brand not found")
     if brands[brand_id].get("user_id") != user["id"]:
         raise HTTPException(403, "Not your brand")
-    playlists = get_playlists()
-    if brand_id not in playlists:
+    pl = _get_playlist_db(brand_id)
+    if not pl:
         raise HTTPException(404, "No playlist found")
     data = await req.json()
     dp_idx: int = data.get("day_part_index", -1)
     song_id: str = data.get("song_id", "")
     if not song_id:
         raise HTTPException(400, "song_id required")
-    pl = playlists[brand_id]
     day_parts = pl.get("day_parts", [])
     if dp_idx < 0 or dp_idx >= len(day_parts):
         raise HTTPException(400, "Invalid day_part_index")
@@ -1432,17 +1549,12 @@ async def replace_track(brand_id: str, req: Request, user: dict = Depends(get_cu
     tracks[track_idx] = replacement
     dp["tracks"] = tracks
     _recalc_daypart_stats(dp)
-    save_playlists(playlists)
     try:
-        _sync_playlist_songs(brand_id, user["id"], day_parts)
+        _sync_playlist_songs(brand_id, user["id"], day_parts, brands[brand_id].get("brand_name", ""))
     except Exception as e:
         logger.warning("Supabase sync failed after track replace: %s", e)
     try:
-        get_supabase().table("brand_playlists").upsert(
-            {"brand_id": brand_id, "user_id": user["id"],
-             "playlist_json": pl, "updated_at": datetime.now(timezone.utc).isoformat()},
-            on_conflict="brand_id",
-        ).execute()
+        _save_playlist_db(brand_id, user["id"], pl)
     except Exception as e:
         logger.warning("brand_playlists upsert failed after track replace: %s", e)
     # Re-resolve src for returned tracks
@@ -1453,24 +1565,7 @@ async def replace_track(brand_id: str, req: Request, user: dict = Depends(get_cu
 
 @protected_router.get("/api/playlists/{brand_id}")
 def get_playlist(brand_id: str):
-    pl = get_playlists().get(brand_id)
-    if not pl:
-        # Fall back to Supabase (e.g. after a backend restart)
-        try:
-            r = get_supabase().table("brand_playlists") \
-                .select("playlist_json") \
-                .eq("brand_id", brand_id) \
-                .maybe_single() \
-                .execute()
-            if r and r.data:
-                raw = r.data["playlist_json"]
-                pl = json.loads(raw) if isinstance(raw, str) else raw
-                # Cache locally so subsequent reads are instant
-                playlists = get_playlists()
-                playlists[brand_id] = pl
-                save_playlists(playlists)
-        except Exception as e:
-            logger.warning("Supabase playlist fallback failed for %s: %s", brand_id, e)
+    pl = _get_playlist_db(brand_id)
     if not pl:
         raise HTTPException(404, "No playlist found for this brand. Run generation first.")
     for dp in pl.get("day_parts", []):
@@ -1567,6 +1662,7 @@ def app_init(
     """Single bootstrap call: returns user info + brands in one round trip."""
     uid = user["id"]
     brands = [b for b in get_brands().values() if b.get("user_id") == uid]
+    brands = _reconcile_playlist_counts(uid, brands)
     return {
         "user":   {"id": uid, "email": user.get("email", ""), "role": role},
         "brands": brands,

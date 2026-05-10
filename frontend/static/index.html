@@ -3,15 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>fabPLAY — Brand Intelligence</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Brandbeat — Brand Intelligence</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2/dist/chartjs-plugin-dragdata.min.js"></script>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=brandbeat">
 <script>tailwind.config={corePlugins:{preflight:false}}</script>
 </head>
 <body x-data="app()" x-init="init()" x-cloak>
@@ -23,9 +24,11 @@
 <!-- ══════════ MAIN AREA ══════════ -->
 <div class="flex-1 flex flex-col overflow-hidden" style="width:100%">
 
-<!-- Top bar: logo + sign out -->
-<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:#fff;border-bottom:1px solid var(--bdr);flex-shrink:0">
-  <img src="/static/logo.jpg" alt="fabPLAY" style="max-height:36px;width:auto;object-fit:contain">
+<!-- Top bar: wordmark + sign out -->
+<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:#fff;border-bottom:1px solid var(--hairline);flex-shrink:0">
+  <a href="/" style="text-decoration:none;display:inline-flex;align-items:baseline;font-family:'Cormorant Garamond',Georgia,serif;font-weight:600;line-height:1;">
+    <span style="font-size:28px;color:#B8451F;letter-spacing:-0.05em;margin-right:2px;line-height:1;">b</span><span style="font-size:20px;color:#0A0A0A;letter-spacing:-0.04em;line-height:1;">randbeat</span>
+  </a>
   <div style="display:flex;align-items:center;gap:12px">
     <span style="font-size:12px;color:var(--faint)" x-text="currentUser?.email||''"></span>
     <button @click="logout()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--bdr);border-radius:6px;cursor:pointer;padding:4px 12px;font-family:inherit">Sign Out</button>
@@ -337,6 +340,30 @@
           </template>
         </div>
       </div>
+      <div x-show="catalogArtists.length">
+        <label class="lbl mb-2">Must-Include Artists</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in catalogArtists.filter(a=>!form.exclude_artists.includes(a))" :key="a">
+            <button type="button" @click="toggleGenre('include_artists',a,form)" :class="form.include_artists.includes(a)?'genre-btn active-include':'genre-btn'" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+      <div x-show="catalogArtists.length">
+        <label class="lbl mb-2">Must-Exclude Artists</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in catalogArtists.filter(a=>!form.include_artists.includes(a))" :key="a">
+            <button type="button" @click="toggleGenre('exclude_artists',a,form)" :class="form.exclude_artists.includes(a)?'genre-btn active-exclude':'genre-btn'" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label class="lbl mb-2">Song Type</label>
+        <div class="flex gap-2">
+          <button type="button" @click="form.song_type_filter=form.song_type_filter==='vocal'?null:'vocal'" :class="form.song_type_filter==='vocal'?'genre-btn active-include':'genre-btn'">🎤 Vocal Only</button>
+          <button type="button" @click="form.song_type_filter=form.song_type_filter==='instrumental'?null:'instrumental'" :class="form.song_type_filter==='instrumental'?'genre-btn active-include':'genre-btn'">🎵 Instrumental Only</button>
+        </div>
+        <p class="text-[11px] text-[var(--faint)] mt-1">Leave unselected for both. Click again to deselect.</p>
+      </div>
       <div class="flex items-center justify-between p-3 rounded-lg" style="border:1px solid var(--bdr)">
         <div>
           <div class="text-sm font-semibold">Filter Explicit Content</div>
@@ -478,11 +505,28 @@
         <h3 class="font-bold">Genre Hard Filters</h3>
         <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
+      <div class="mb-4">
+        <label class="lbl mb-2">Song Type Filter</label>
+        <div class="flex gap-2 mb-1">
+          <button type="button" @click="toggleSbSongType('vocal')" :class="sbSongTypeFilter==='vocal'?'genre-btn active-include':'genre-btn'">🎤 Vocal Only</button>
+          <button type="button" @click="toggleSbSongType('instrumental')" :class="sbSongTypeFilter==='instrumental'?'genre-btn active-include':'genre-btn'">🎵 Instrumental Only</button>
+        </div>
+        <p class="text-[11px] text-[var(--faint)]">Applied when generating next playlist. Click active button to remove filter.</p>
+      </div>
       <p class="text-xs text-[var(--muted)] mb-3">Click to cycle: <span style="color:#10B981" class="font-semibold">Include</span> → <span style="color:var(--red)" class="font-semibold">Exclude</span> → Neutral. Save to apply to next playlist.</p>
-      <div class="flex flex-wrap gap-2">
+      <p class="text-xs font-semibold text-[var(--muted)] mb-1 mt-1">Genres</p>
+      <div class="flex flex-wrap gap-2 mb-4">
         <template x-for="g in genres" :key="g">
           <button type="button" @click="toggleSbGenre(g)" :class="sbExcluded(g)?'genre-btn active-exclude':(sbIncluded(g)?'genre-btn active-include':'genre-btn')" x-text="(sbIncluded(g)?'✓ ':sbExcluded(g)?'✕ ':'')+g"></button>
         </template>
+      </div>
+      <div x-show="catalogArtists.length">
+        <p class="text-xs font-semibold text-[var(--muted)] mb-1">Artists</p>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in catalogArtists" :key="a">
+            <button type="button" @click="toggleSbArtist(a)" :class="sbArtistExcluded(a)?'genre-btn active-exclude':(sbArtistIncluded(a)?'genre-btn active-include':'genre-btn')" x-text="(sbArtistIncluded(a)?'✓ ':sbArtistExcluded(a)?'✕ ':'')+a"></button>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -564,7 +608,7 @@
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="curPl.day_parts[activeDp].track_count"></div><div class="text-[10px] text-[var(--faint)]">tracks</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="Math.round((curPl.day_parts[activeDp].total_duration_seconds||0)/60)+'m'"></div><div class="text-[10px] text-[var(--faint)]">duration</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" :class="(curPl.day_parts[activeDp].avg_bfs||0)>=.75?'text-emerald-600':(curPl.day_parts[activeDp].avg_bfs||0)>=.5?'text-amber-500':'text-red-500'" x-text="(curPl.day_parts[activeDp].avg_bfs||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg BFS</div></div>
-          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg text-purple-600" x-text="(curPl.day_parts[activeDp].avg_mmr||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg MMR</div></div>
+          <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].valence_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">valence</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].energy_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">energy</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].tempo_target||0)+' BPM'"></div><div class="text-[10px] text-[var(--faint)]">tempo</div></div>
         </div>
@@ -813,7 +857,7 @@
 <!-- ══════════ PLAYLIST NAMING MODAL ══════════ -->
 <div x-show="showNamingModal" class="modal-bg" x-cloak @click.self="showNamingModal=false" >
   <div class="modal-box p-8" style="max-width:440px;width:100%;text-align:left">
-    <h2 style="font-family:var(--font-heading);font-size:20px;font-weight:700;margin-bottom:6px">Name your playlist</h2>
+    <h2 style="font-family:'Cormorant Garamond',Georgia,serif;font-size:20px;font-weight:700;margin-bottom:6px">Name your playlist</h2>
     <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Give it a name — you can always rename it later.</p>
     <input
       type="text"
@@ -833,7 +877,7 @@
 <!-- ══════════ PLAYLIST RENAME MODAL ══════════ -->
 <div x-show="showRenameModal" class="modal-bg" x-cloak @click.self="showRenameModal=false" >
   <div class="modal-box p-8" style="max-width:440px;width:100%;text-align:left">
-    <h2 style="font-family:var(--font-heading);font-size:20px;font-weight:700;margin-bottom:20px">Rename playlist</h2>
+    <h2 style="font-family:'Cormorant Garamond',Georgia,serif;font-size:20px;font-weight:700;margin-bottom:20px">Rename playlist</h2>
     <input
       type="text"
       x-model="renameValue"
