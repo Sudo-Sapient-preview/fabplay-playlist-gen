@@ -277,6 +277,22 @@
     }
     .how-cta { margin-top: 56px; }
 
+    /* ── Hero inline tracks ── */
+    .hero-tracks {
+      margin-top: 48px;
+      border-top: 1px solid var(--hairline);
+      padding-top: 32px;
+    }
+    .hero-tracks-label {
+      font-family: var(--font-label);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--slate);
+      margin-bottom: 4px;
+    }
+
     /* ── Audio preview ── */
     .audio-sub {
       margin-top: 20px;
@@ -595,7 +611,62 @@
       </p>
       <div class="hero-ctas">
         <a href="/login" class="btn btn-primary">Start a playlist</a>
-        <a href="#audio" class="btn btn-secondary">Hear examples</a>
+      </div>
+
+      <!-- ── Inline audio preview ── -->
+      <div class="hero-tracks">
+        <p class="hero-tracks-label">Hear how it sounds.</p>
+        <div class="tracks">
+
+          <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3" data-title="Sunday morning, cafe mix." data-meta="Hospitality · AM · 36 tracks · 2 h 14 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+            <button class="play-btn" aria-label="Play">
+              <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+              <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+              <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
+            </button>
+            <div class="track-info">
+              <p class="track-title"><em>Sunday morning, cafe mix.</em></p>
+              <p class="track-meta">Hospitality &middot; AM &middot; 36 tracks &middot; 2 h 14 m</p>
+              <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+              <audio preload="none"></audio>
+            </div>
+            <div class="bar-desktop"><div class="bar-fill"></div></div>
+            <div class="track-time">0:00</div>
+          </div>
+
+          <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3" data-title="Saturday afternoon, flagship fashion store." data-meta="Retail · PM · 28 tracks · 1 h 52 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+            <button class="play-btn" aria-label="Play">
+              <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+              <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+              <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
+            </button>
+            <div class="track-info">
+              <p class="track-title"><em>Saturday afternoon, flagship fashion store.</em></p>
+              <p class="track-meta">Retail &middot; PM &middot; 28 tracks &middot; 1 h 52 m</p>
+              <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+              <audio preload="none"></audio>
+            </div>
+            <div class="bar-desktop"><div class="bar-fill"></div></div>
+            <div class="track-time">0:00</div>
+          </div>
+
+          <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3" data-title="Friday evening, fine dining." data-meta="Hospitality · Evening · 22 tracks · 1 h 30 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+            <button class="play-btn" aria-label="Play">
+              <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+              <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+              <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
+            </button>
+            <div class="track-info">
+              <p class="track-title"><em>Friday evening, fine dining.</em></p>
+              <p class="track-meta">Hospitality &middot; Evening &middot; 22 tracks &middot; 1 h 30 m</p>
+              <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
+              <audio preload="none"></audio>
+            </div>
+            <div class="bar-desktop"><div class="bar-fill"></div></div>
+            <div class="track-time">0:00</div>
+          </div>
+
+        </div>
       </div>
     </div>
   </div>
@@ -645,64 +716,6 @@
     </div>
   </section>
 
-  <!-- ── Audio preview ── -->
-  <section class="sec-std" id="audio">
-    <div class="wrap">
-      <h2 class="sec-h2">Hear it in three rooms.</h2>
-      <p class="audio-sub">Tap to listen. No autoplay, no surprises.</p>
-      <div class="tracks">
-
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3" data-title="Sunday morning, cafe mix." data-meta="Hospitality · AM · 36 tracks · 2 h 14 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
-          <button class="play-btn" aria-label="Play">
-            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
-            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
-            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-          </button>
-          <div class="track-info">
-            <p class="track-title"><em>Sunday morning, cafe mix.</em></p>
-            <p class="track-meta">Hospitality &middot; AM &middot; 36 tracks &middot; 2 h 14 m</p>
-            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
-            <audio preload="none"></audio>
-          </div>
-          <div class="bar-desktop"><div class="bar-fill"></div></div>
-          <div class="track-time">0:00</div>
-        </div>
-
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3" data-title="Saturday afternoon, flagship fashion store." data-meta="Retail · PM · 28 tracks · 1 h 52 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
-          <button class="play-btn" aria-label="Play">
-            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
-            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
-            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-          </button>
-          <div class="track-info">
-            <p class="track-title"><em>Saturday afternoon, flagship fashion store.</em></p>
-            <p class="track-meta">Retail &middot; PM &middot; 28 tracks &middot; 1 h 52 m</p>
-            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
-            <audio preload="none"></audio>
-          </div>
-          <div class="bar-desktop"><div class="bar-fill"></div></div>
-          <div class="track-time">0:00</div>
-        </div>
-
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3" data-title="Friday evening, fine dining." data-meta="Hospitality · Evening · 22 tracks · 1 h 30 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
-          <button class="play-btn" aria-label="Play">
-            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
-            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
-            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-          </button>
-          <div class="track-info">
-            <p class="track-title"><em>Friday evening, fine dining.</em></p>
-            <p class="track-meta">Hospitality &middot; Evening &middot; 22 tracks &middot; 1 h 30 m</p>
-            <div class="bar-wrap-mobile"><div class="bar-fill"></div></div>
-            <audio preload="none"></audio>
-          </div>
-          <div class="bar-desktop"><div class="bar-fill"></div></div>
-          <div class="track-time">0:00</div>
-        </div>
-
-      </div>
-    </div>
-  </section>
 
   <!-- ── Quiet details ── -->
   <section class="sec-std">
