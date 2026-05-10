@@ -1593,6 +1593,100 @@ def serve_song(path: str):
     return FileResponse(str(file_path), media_type="audio/mpeg")
 
 
+# ─── Demo playlists ───────────────────────────────────────────────────────────
+
+_DEMO_SPECS = [
+    {
+        "id":    "demo-cafe-am",
+        "title": "Sunday morning, cafe mix.",
+        "meta":  "Hospitality · AM · 36 tracks · 2 h 14 m",
+        "n":     36,
+        "genres": ["jazz", "acoustic", "ambient", "bossa nova", "folk", "classical", "cafe", "chillout", "lounge"],
+        "tempo_max": 120,
+    },
+    {
+        "id":    "demo-retail-pm",
+        "title": "Saturday afternoon, flagship fashion store.",
+        "meta":  "Retail · PM · 28 tracks · 1 h 52 m",
+        "n":     28,
+        "genres": ["indie pop", "pop", "electronic", "indie", "dance", "r&b", "hip hop", "hip-hop", "funk", "soul"],
+        "tempo_min": 100,
+    },
+    {
+        "id":    "demo-dining-eve",
+        "title": "Friday evening, fine dining.",
+        "meta":  "Hospitality · Evening · 22 tracks · 1 h 30 m",
+        "n":     22,
+        "genres": ["jazz", "classical", "ambient", "soul", "bossa nova", "lounge", "smooth jazz", "neo soul"],
+    },
+]
+
+_demo_cache: list = []
+
+
+def _fetch_demo_tracks(spec: dict) -> list[dict]:
+    import random
+    try:
+        r = get_supabase().table("songs").select(
+            "id,title,artist,genre,url,tempo_bpm,energy,duration_seconds"
+        ).limit(500).execute()
+        songs = r.data or []
+    except Exception as e:
+        logger.warning("_fetch_demo_tracks failed: %s", e)
+        return []
+
+    genres   = [g.lower() for g in spec.get("genres", [])]
+    t_min    = spec.get("tempo_min", 0)
+    t_max    = spec.get("tempo_max", 300)
+
+    def genre_match(s):
+        g = (s.get("genre") or "").lower()
+        return any(genre in g for genre in genres)
+
+    # genre + tempo filter
+    filtered = [s for s in songs if genre_match(s) and t_min <= float(s.get("tempo_bpm") or 0) <= t_max]
+
+    # relax tempo if too few
+    if len(filtered) < spec["n"] // 2:
+        filtered = [s for s in songs if genre_match(s)]
+
+    # fall back to all songs
+    if len(filtered) < spec["n"] // 2:
+        filtered = songs[:]
+
+    random.shuffle(filtered)
+    selected = filtered[:spec["n"]]
+    return [
+        {
+            "song_id":          s.get("id", ""),
+            "title":            s.get("title", ""),
+            "artist":           s.get("artist", ""),
+            "genre":            s.get("genre", ""),
+            "src":              _resolve_track_src(s),
+            "duration_seconds": s.get("duration_seconds", 210),
+        }
+        for s in selected
+    ]
+
+
+@public_router.get("/api/demo")
+def demo_playlists():
+    """Public — returns 3 demo playlists for the landing page audio preview."""
+    global _demo_cache
+    if _demo_cache:
+        return _demo_cache
+    result = []
+    for spec in _DEMO_SPECS:
+        result.append({
+            "id":     spec["id"],
+            "title":  spec["title"],
+            "meta":   spec["meta"],
+            "tracks": _fetch_demo_tracks(spec),
+        })
+    _demo_cache = result
+    return result
+
+
 # ─── Routes: Public ───────────────────────────────────────────────────────────
 
 @public_router.get("/api/config")

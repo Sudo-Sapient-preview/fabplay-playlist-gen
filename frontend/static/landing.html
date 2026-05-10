@@ -652,7 +652,7 @@
       <p class="audio-sub">Tap to listen. No autoplay, no surprises.</p>
       <div class="tracks">
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3" data-title="Sunday morning, cafe mix." data-meta="Hospitality · AM · 36 tracks · 2 h 14 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+        <div class="track-row" data-demo-id="demo-cafe-am" data-title="Sunday morning, cafe mix." data-meta="Hospitality · AM · 36 tracks · 2 h 14 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
           <button class="play-btn" aria-label="Play">
             <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
             <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
@@ -668,7 +668,7 @@
           <div class="track-time">0:00</div>
         </div>
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3" data-title="Saturday afternoon, flagship fashion store." data-meta="Retail · PM · 28 tracks · 1 h 52 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+        <div class="track-row" data-demo-id="demo-retail-pm" data-title="Saturday afternoon, flagship fashion store." data-meta="Retail · PM · 28 tracks · 1 h 52 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
           <button class="play-btn" aria-label="Play">
             <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
             <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
@@ -684,7 +684,7 @@
           <div class="track-time">0:00</div>
         </div>
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3" data-title="Friday evening, fine dining." data-meta="Hospitality · Evening · 22 tracks · 1 h 30 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+        <div class="track-row" data-demo-id="demo-dining-eve" data-title="Friday evening, fine dining." data-meta="Hospitality · Evening · 22 tracks · 1 h 30 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
           <button class="play-btn" aria-label="Play">
             <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
             <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
@@ -794,6 +794,15 @@
   const miniTime   = document.getElementById('mini-time');
 
   let activeRow = null;
+  const demoPlaylists = {};
+  const demoIndex     = {};
+
+  fetch('/api/demo').then(r => r.json()).then(pls => {
+    pls.forEach(pl => {
+      demoPlaylists[pl.id] = pl.tracks;
+      demoIndex[pl.id]     = 0;
+    });
+  }).catch(() => {});
 
   function fmt(s) {
     if (!isFinite(s) || s <= 0) return '0:00';
@@ -805,13 +814,13 @@
     row.querySelectorAll('.bar-fill').forEach(el => el.style.width = pct + '%');
     const t = row.querySelector('.track-time');
     if (t) t.textContent = fmt(time);
-    miniBar.style.width = pct + '%';
+    miniBar.style.width  = pct + '%';
     miniTime.textContent = fmt(time);
   }
 
-  function showMini(row) {
-    miniTitle.textContent = row.dataset.title || '';
-    miniMeta.textContent  = row.dataset.meta  || '';
+  function showMini(title, meta) {
+    miniTitle.textContent = title || '';
+    miniMeta.textContent  = meta  || '';
     miniPlayer.classList.add('visible', 'playing');
   }
 
@@ -819,28 +828,46 @@
     miniPlayer.classList.remove('visible', 'playing');
   }
 
+  function trackLabel(track) {
+    if (!track) return '';
+    return track.artist ? track.title + ' — ' + track.artist : track.title;
+  }
+
   function stopRow(row) {
-    const audio = row.querySelector('audio');
-    const btn   = row.querySelector('.play-btn');
+    const audio  = row.querySelector('audio');
     audio.pause();
-    btn.setAttribute('aria-label', 'Play');
+    audio.src = '';
+    row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
     row.classList.remove('playing');
     setBar(row, 0, 0);
+    const demoId = row.dataset.demoId;
+    if (demoId) demoIndex[demoId] = 0;
     activeRow = null;
     hideMini();
   }
 
   function toggleTrack(btn) {
-    const row   = btn.closest('.track-row');
-    const audio = row.querySelector('audio');
-    if (!audio.src) audio.src = row.dataset.src;
+    const row    = btn.closest('.track-row');
+    const audio  = row.querySelector('audio');
+    const demoId = row.dataset.demoId;
+
     if (activeRow && activeRow !== row) stopRow(activeRow);
+
     if (audio.paused) {
+      if (!audio.src || audio.src === location.href) {
+        if (demoId && demoPlaylists[demoId] && demoPlaylists[demoId].length) {
+          const track = demoPlaylists[demoId][demoIndex[demoId] || 0];
+          if (track) audio.src = track.src;
+        }
+      }
+      if (!audio.src || audio.src === location.href) return;
       audio.play().then(() => {
         btn.setAttribute('aria-label', 'Pause');
         row.classList.add('playing');
         activeRow = row;
-        showMini(row);
+        const idx   = demoId ? (demoIndex[demoId] || 0) : -1;
+        const track = demoId && demoPlaylists[demoId] ? demoPlaylists[demoId][idx] : null;
+        showMini(track ? trackLabel(track) : row.dataset.title, row.dataset.meta);
       }).catch(() => {});
     } else {
       audio.pause();
@@ -857,12 +884,33 @@
   }
 
   document.querySelectorAll('.track-row').forEach(row => {
-    const audio = row.querySelector('audio');
+    const audio  = row.querySelector('audio');
+    const demoId = row.dataset.demoId;
+
     audio.addEventListener('timeupdate', () => {
       const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
       setBar(row, pct, audio.currentTime);
     });
+
     audio.addEventListener('ended', () => {
+      if (demoId && demoPlaylists[demoId]) {
+        const nextIdx = (demoIndex[demoId] || 0) + 1;
+        if (nextIdx < demoPlaylists[demoId].length) {
+          demoIndex[demoId] = nextIdx;
+          const track = demoPlaylists[demoId][nextIdx];
+          audio.src = track.src;
+          audio.play().then(() => {
+            showMini(trackLabel(track), row.dataset.meta);
+          }).catch(() => {
+            row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
+            row.classList.remove('playing');
+            activeRow = null;
+            hideMini();
+          });
+          return;
+        }
+        demoIndex[demoId] = 0;
+      }
       row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
       row.classList.remove('playing');
       setBar(row, 0, 0);
