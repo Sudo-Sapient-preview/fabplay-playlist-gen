@@ -316,6 +316,110 @@
     }
     .play-btn:hover  { background: var(--pr-hover); }
     .play-btn:active { background: var(--pr-active); }
+
+    /* Icon states inside play button */
+    .play-btn .ico-play  { display: flex; align-items: center; justify-content: center; }
+    .play-btn .ico-pause { display: none; align-items: center; justify-content: center; }
+    .play-btn .ico-eq    { display: none; align-items: flex-end; gap: 2px; height: 14px; }
+    .play-btn .ico-eq .bar {
+      width: 3px; background: var(--bone); border-radius: 1px;
+      transform-origin: bottom;
+      animation: eq-bounce 0.6s ease-in-out infinite alternate;
+    }
+    .play-btn .ico-eq .bar:nth-child(1) { animation-delay: 0.00s; animation-duration: 0.70s; }
+    .play-btn .ico-eq .bar:nth-child(2) { animation-delay: 0.15s; animation-duration: 0.50s; }
+    .play-btn .ico-eq .bar:nth-child(3) { animation-delay: 0.05s; animation-duration: 0.65s; }
+    .play-btn .ico-eq .bar:nth-child(4) { animation-delay: 0.25s; animation-duration: 0.55s; }
+    @keyframes eq-bounce { from { height: 3px; } to { height: 13px; } }
+
+    /* Row playing state */
+    .track-row { cursor: pointer; }
+    .track-row.playing { background: rgba(184,69,31,0.04); }
+    .track-row.playing .play-btn .ico-play  { display: none; }
+    .track-row.playing .play-btn .ico-eq    { display: flex; }
+    .track-row.playing .play-btn:hover .ico-eq   { display: none; }
+    .track-row.playing .play-btn:hover .ico-pause { display: flex; }
+
+    /* ── Sticky mini-player ── */
+    .mini-player {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 100;
+      background: var(--black);
+      color: var(--bone);
+      transform: translateY(100%);
+      transition: transform 200ms ease;
+    }
+    .mini-player.visible { transform: translateY(0); }
+    .mini-player-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 28px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    @media (min-width: 600px) { .mini-player-inner { padding: 0 48px; } }
+    @media (min-width: 900px) { .mini-player-inner { padding: 0 80px; } }
+
+    .mini-play-btn {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--penguin-red);
+      color: var(--bone);
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 120ms ease;
+    }
+    .mini-play-btn:hover { background: var(--pr-hover); }
+    .mini-play-btn .ico-play  { display: flex; }
+    .mini-play-btn .ico-pause { display: none; }
+    .mini-player.playing .mini-play-btn .ico-play  { display: none; }
+    .mini-player.playing .mini-play-btn .ico-pause { display: flex; }
+
+    .mini-eq {
+      display: none; align-items: flex-end; gap: 2px; height: 14px; flex-shrink: 0;
+    }
+    .mini-player.playing .mini-eq { display: flex; }
+    .mini-eq .bar {
+      width: 3px; background: var(--penguin-red); border-radius: 1px;
+      animation: eq-bounce 0.6s ease-in-out infinite alternate;
+    }
+    .mini-eq .bar:nth-child(1) { animation-delay: 0.00s; animation-duration: 0.70s; }
+    .mini-eq .bar:nth-child(2) { animation-delay: 0.15s; animation-duration: 0.50s; }
+    .mini-eq .bar:nth-child(3) { animation-delay: 0.05s; animation-duration: 0.65s; }
+    .mini-eq .bar:nth-child(4) { animation-delay: 0.25s; animation-duration: 0.55s; }
+
+    .mini-info { flex: 1; min-width: 0; }
+    .mini-title {
+      font-family: var(--font-display);
+      font-size: 15px; font-weight: 600; font-style: italic;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      color: var(--bone);
+    }
+    .mini-meta {
+      font-family: var(--font-label);
+      font-size: 10px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase;
+      color: rgba(242,238,229,0.5); margin-top: 2px;
+    }
+    .mini-bar-wrap {
+      flex: 1; max-width: 200px; height: 2px;
+      background: rgba(242,238,229,0.15); border-radius: 1px; overflow: hidden;
+      display: none;
+    }
+    @media (min-width: 640px) { .mini-bar-wrap { display: block; } }
+    .mini-bar-fill { height: 100%; background: var(--penguin-red); width: 0%; transition: width 0.15s linear; }
+    .mini-time {
+      font-family: var(--font-label); font-size: 11px; font-weight: 500;
+      letter-spacing: 0.08em; color: rgba(242,238,229,0.5);
+      font-variant-numeric: tabular-nums; flex-shrink: 0;
+      display: none;
+    }
+    @media (min-width: 640px) { .mini-time { display: block; } }
+
     .track-info { min-width: 0; }
     .track-title {
       font-family: var(--font-display);
@@ -548,9 +652,11 @@
       <p class="audio-sub">Tap to listen. No autoplay, no surprises.</p>
       <div class="tracks">
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3">
-          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/03/15/audio_1718e49cce.mp3" data-title="Sunday morning, cafe mix." data-meta="Hospitality · AM · 36 tracks · 2 h 14 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+          <button class="play-btn" aria-label="Play">
+            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
           </button>
           <div class="track-info">
             <p class="track-title"><em>Sunday morning, cafe mix.</em></p>
@@ -562,9 +668,11 @@
           <div class="track-time">0:00</div>
         </div>
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3">
-          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2022/10/30/audio_347111d654.mp3" data-title="Saturday afternoon, flagship fashion store." data-meta="Retail · PM · 28 tracks · 1 h 52 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+          <button class="play-btn" aria-label="Play">
+            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
           </button>
           <div class="track-info">
             <p class="track-title"><em>Saturday afternoon, flagship fashion store.</em></p>
@@ -576,9 +684,11 @@
           <div class="track-time">0:00</div>
         </div>
 
-        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3">
-          <button class="play-btn" aria-label="Play" onclick="toggleTrack(this)">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+        <div class="track-row" data-src="https://cdn.pixabay.com/audio/2024/02/01/audio_4a4a8bc1f7.mp3" data-title="Friday evening, fine dining." data-meta="Hospitality · Evening · 22 tracks · 1 h 30 m" onclick="toggleTrack(this.querySelector('.play-btn'))">
+          <button class="play-btn" aria-label="Play">
+            <span class="ico-play"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+            <span class="ico-pause"><svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+            <span class="ico-eq" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
           </button>
           <div class="track-info">
             <p class="track-title"><em>Friday evening, fine dining.</em></p>
@@ -651,6 +761,25 @@
   </div>
 </footer>
 
+<!-- ── Sticky mini-player ── -->
+<div class="mini-player" id="mini-player">
+  <div class="mini-player-inner">
+    <div class="mini-eq" aria-hidden="true">
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+    </div>
+    <button class="mini-play-btn" aria-label="Pause" onclick="miniToggle()">
+      <span class="ico-play"><svg width="10" height="12" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg></span>
+      <span class="ico-pause"><svg width="10" height="12" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg></span>
+    </button>
+    <div class="mini-info">
+      <div class="mini-title" id="mini-title"></div>
+      <div class="mini-meta" id="mini-meta"></div>
+    </div>
+    <div class="mini-bar-wrap"><div class="mini-bar-fill" id="mini-bar"></div></div>
+    <div class="mini-time" id="mini-time">0:00</div>
+  </div>
+</div>
+
 <script>
   // Navbar scroll border
   const navbar = document.getElementById('navbar');
@@ -658,9 +787,11 @@
     navbar.classList.toggle('scrolled', window.scrollY > 4);
   }, { passive: true });
 
-  // Audio player
-  const PLAY_SVG  = `<svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><path d="M0 0 L12 7 L0 14 Z"/></svg>`;
-  const PAUSE_SVG = `<svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg>`;
+  const miniPlayer = document.getElementById('mini-player');
+  const miniTitle  = document.getElementById('mini-title');
+  const miniMeta   = document.getElementById('mini-meta');
+  const miniBar    = document.getElementById('mini-bar');
+  const miniTime   = document.getElementById('mini-time');
 
   let activeRow = null;
 
@@ -670,20 +801,33 @@
     return `${m}:${sec.toString().padStart(2, '0')}`;
   }
 
-  function stopRow(row) {
-    const audio = row.querySelector('audio');
-    const btn   = row.querySelector('.play-btn');
-    audio.pause();
-    btn.innerHTML = PLAY_SVG;
-    btn.setAttribute('aria-label', 'Play');
-    setBar(row, 0, 0);
-    activeRow = null;
-  }
-
   function setBar(row, pct, time) {
     row.querySelectorAll('.bar-fill').forEach(el => el.style.width = pct + '%');
     const t = row.querySelector('.track-time');
     if (t) t.textContent = fmt(time);
+    miniBar.style.width = pct + '%';
+    miniTime.textContent = fmt(time);
+  }
+
+  function showMini(row) {
+    miniTitle.textContent = row.dataset.title || '';
+    miniMeta.textContent  = row.dataset.meta  || '';
+    miniPlayer.classList.add('visible', 'playing');
+  }
+
+  function hideMini() {
+    miniPlayer.classList.remove('visible', 'playing');
+  }
+
+  function stopRow(row) {
+    const audio = row.querySelector('audio');
+    const btn   = row.querySelector('.play-btn');
+    audio.pause();
+    btn.setAttribute('aria-label', 'Play');
+    row.classList.remove('playing');
+    setBar(row, 0, 0);
+    activeRow = null;
+    hideMini();
   }
 
   function toggleTrack(btn) {
@@ -693,16 +837,23 @@
     if (activeRow && activeRow !== row) stopRow(activeRow);
     if (audio.paused) {
       audio.play().then(() => {
-        btn.innerHTML = PAUSE_SVG;
         btn.setAttribute('aria-label', 'Pause');
+        row.classList.add('playing');
         activeRow = row;
+        showMini(row);
       }).catch(() => {});
     } else {
       audio.pause();
-      btn.innerHTML = PLAY_SVG;
       btn.setAttribute('aria-label', 'Play');
+      row.classList.remove('playing');
       activeRow = null;
+      hideMini();
     }
+  }
+
+  function miniToggle() {
+    if (!activeRow) return;
+    toggleTrack(activeRow.querySelector('.play-btn'));
   }
 
   document.querySelectorAll('.track-row').forEach(row => {
@@ -712,10 +863,11 @@
       setBar(row, pct, audio.currentTime);
     });
     audio.addEventListener('ended', () => {
-      row.querySelector('.play-btn').innerHTML = PLAY_SVG;
       row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
+      row.classList.remove('playing');
       setBar(row, 0, 0);
       activeRow = null;
+      hideMini();
     });
   });
 </script>
