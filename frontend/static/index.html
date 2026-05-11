@@ -568,7 +568,15 @@
   <div x-show="!curPl && !curBrand?.sound_board_result" class="p-16 text-center">
     <div class="empty-ico">🎚️</div>
     <p class="font-semibold mt-3">No sound board generated yet</p>
-    <p class="text-sm text-[var(--muted)] mt-1">Create a brand to see its sound board</p>
+    <template x-if="curBrand?.id">
+      <div class="mt-4">
+        <p class="text-sm text-[var(--muted)] mb-4">The sound board may have failed to generate. Click below to retry.</p>
+        <button @click="generateSoundboard(curBrand.id)" class="btn btn-r">Generate Sound Board</button>
+      </div>
+    </template>
+    <template x-if="!curBrand?.id">
+      <p class="text-sm text-[var(--muted)] mt-1">Create a brand to see its sound board</p>
+    </template>
   </div>
 </div>
 

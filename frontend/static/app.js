@@ -472,6 +472,7 @@ return {
             } else {
               this.showGen=false;
               this.scheduleSbChartsInit();
+              alert('Sound board generation failed: '+(this.genTask?.error||'Unknown error')+'\n\nYou can retry from the sound board page.');
             }
           }
         }

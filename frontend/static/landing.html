@@ -828,11 +828,6 @@
     miniPlayer.classList.remove('visible', 'playing');
   }
 
-  function trackLabel(track) {
-    if (!track) return '';
-    return track.artist ? track.title + ' — ' + track.artist : track.title;
-  }
-
   function stopRow(row) {
     const audio  = row.querySelector('audio');
     audio.pause();
@@ -865,9 +860,7 @@
         btn.setAttribute('aria-label', 'Pause');
         row.classList.add('playing');
         activeRow = row;
-        const idx   = demoId ? (demoIndex[demoId] || 0) : -1;
-        const track = demoId && demoPlaylists[demoId] ? demoPlaylists[demoId][idx] : null;
-        showMini(track ? trackLabel(track) : row.dataset.title, row.dataset.meta);
+        showMini(row.dataset.title, row.dataset.meta);
       }).catch(() => {});
     } else {
       audio.pause();
@@ -900,7 +893,7 @@
           const track = demoPlaylists[demoId][nextIdx];
           audio.src = track.src;
           audio.play().then(() => {
-            showMini(trackLabel(track), row.dataset.meta);
+            showMini(row.dataset.title, row.dataset.meta);
           }).catch(() => {
             row.querySelector('.play-btn').setAttribute('aria-label', 'Play');
             row.classList.remove('playing');
