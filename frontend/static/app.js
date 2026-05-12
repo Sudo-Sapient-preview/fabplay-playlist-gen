@@ -441,6 +441,7 @@ return {
     if(!id)return;
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
+    if(this.genInterval){clearInterval(this.genInterval);this.genInterval=null;}
     this.genMode='soundboard';
     this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
     this.showGen=true;
@@ -455,15 +456,19 @@ return {
   _pollSb(taskId,brandId){
     if(this.sbInterval)clearInterval(this.sbInterval);
     this.sbInterval=setInterval(async()=>{
+      if(this.genMode!=='soundboard')return;
       try{
         const r=await this.apiFetch('/api/generate/status/'+taskId);
-        if(r&&r.ok){
+        if(this.genMode!=='soundboard')return;
+        if(!r||r.status===404){clearInterval(this.sbInterval);this.sbInterval=null;this.showGen=false;this.genTask=null;return;}
+        if(r.ok){
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
             const finalStatus=this.genTask.status;
             clearInterval(this.sbInterval);this.sbInterval=null;
             await this.loadBrands();
+            if(this.genMode!=='soundboard')return;
             if(finalStatus==='done'){
               const b=this.brands.find(x=>x.id===brandId);
               if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
@@ -557,6 +562,7 @@ return {
   },
 
   async _startGenerate(id,playlistName){
+    if(this.sbInterval){clearInterval(this.sbInterval);this.sbInterval=null;}
     this.genMode='playlist';
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
@@ -628,9 +634,12 @@ return {
   _pollGen(taskId,brandId){
     if(this.genInterval)clearInterval(this.genInterval);
     this.genInterval=setInterval(async()=>{
+      if(this.genMode!=='playlist')return;
       try{
         const r=await this.apiFetch('/api/generate/status/'+taskId);
-        if(r&&r.ok){
+        if(this.genMode!=='playlist')return;
+        if(!r||r.status===404){clearInterval(this.genInterval);this.genInterval=null;this.showGen=false;this.genTask=null;return;}
+        if(r.ok){
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
@@ -642,6 +651,7 @@ return {
                 this.genTask.log=[...(this.genTask.log||[]),'Finalizing playlists...'];
                 await new Promise(res=>setTimeout(res,450));
               }
+              if(this.genMode!=='playlist')return;
               // Fetch playlist before navigating so tracks are ready on arrival
               this.plLoading=true;
               if(brandId){try{const pr=await this.apiFetch('/api/playlists/'+brandId);if(pr&&pr.ok)this.curPl=await pr.json()}catch(e){}}

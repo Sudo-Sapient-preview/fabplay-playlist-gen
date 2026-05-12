@@ -79,6 +79,15 @@ def _build_user_prompt(inputs: dict) -> str:
             )
         lines.append("")
 
+    scraped = inputs.get("scraped_content", "").strip()
+    if scraped:
+        lines.append(
+            "=== WEBSITE CONTENT (scraped — use to inform all brand inferences) ===\n"
+            + scraped
+            + "\n=== END WEBSITE CONTENT ==="
+        )
+        lines.append("")
+
     lines += [
         f"Brand Name: {inputs.get('brand_name', '')}",
         f"Business Category: {inputs.get('business_category', '')}",

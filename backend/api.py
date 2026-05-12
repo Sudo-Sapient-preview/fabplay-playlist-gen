@@ -29,6 +29,7 @@ from openai import AzureOpenAI
 
 from backend.db import get_supabase, run_startup_checks, fetch_all_songs
 from brand_pipeline.brand_analysis import get_brand_profile
+from brand_pipeline.web_scraper import scrape_brand_website
 from brand_pipeline.sound_board import get_sound_board, apply_segment_adjustments
 from pipeline.rag_retriever import retrieve_candidates, fetch_must_include_tracks, fetch_must_include_genre_tracks, apply_hard_filters, apply_exclusion_filters_only
 from pipeline.mmr_scorer import mmr_select, compute_relevance, compute_track_sim
@@ -230,12 +231,25 @@ def _get_brands_db(uid: str = None) -> dict:
                 bp_q = bp_q.eq("user_id", uid)
             for row in (bp_q.execute().data or []):
                 bid = row.get("brand_id")
-                if bid and bid not in seen:
-                    pj = row.get("playlist_json")
-                    if pj:
-                        obj = json.loads(pj) if isinstance(pj, str) else pj
-                        if obj.get("__brand_config__"):
-                            seen[bid] = obj
+                if not bid:
+                    continue
+                pj = row.get("playlist_json")
+                obj = (json.loads(pj) if isinstance(pj, str) else pj) if pj else {}
+                bp = obj.get("brand_profile") or {}
+                resolved_name = obj.get("brand_name") or bp.get("brand_name") or ""
+                if bid not in seen:
+                    if obj.get("__brand_config__"):
+                        seen[bid] = obj
+                    else:
+                        seen[bid] = {
+                            "id":             bid,
+                            "brand_name":     resolved_name or bid,
+                            "user_id":        row.get("user_id", ""),
+                            "status":         "active",
+                            "playlist_count": 1,
+                        }
+                elif not seen[bid].get("brand_name") and resolved_name:
+                    seen[bid] = {**seen[bid], "brand_name": resolved_name}
         except Exception as e2:
             logger.warning("_get_brands_db bp fallback failed: %s", e2)
         return seen
@@ -248,9 +262,12 @@ def _save_brands_db(brands: dict):
     """Update brand_json in user_playlist_songs for every song row belonging to each brand."""
     if not brands:
         return
-    try:
-        for bid, b in brands.items():
-            uid = b.get("user_id", "")
+    for bid, b in brands.items():
+        uid = b.get("user_id", "")
+        if not uid:
+            logger.warning("_save_brands_db skipping brand %s — missing user_id", bid)
+            continue
+        try:
             result = get_supabase().table("user_playlist_songs") \
                 .update({"brand_json": b}) \
                 .eq("brand_id", bid) \
@@ -267,8 +284,8 @@ def _save_brands_db(brands: dict):
                     }, on_conflict="brand_id").execute()
                 except Exception as upsert_err:
                     logger.warning("_save_brands_db brand_playlists upsert failed for %s: %s", bid, upsert_err)
-    except Exception as e:
-        logger.warning("_save_brands_db failed: %s", e)
+        except Exception as e:
+            logger.warning("_save_brands_db failed for brand %s: %s", bid, e)
 
 
 def _get_brand_db(brand_id: str) -> Optional[dict]:
@@ -294,7 +311,7 @@ def _get_brand_db(brand_id: str) -> Optional[dict]:
             return bj
         # Fallback: brand may exist in brand_playlists before any playlist is generated
         r2 = get_supabase().table("brand_playlists") \
-            .select("playlist_json") \
+            .select("user_id,playlist_json") \
             .eq("brand_id", brand_id) \
             .limit(1) \
             .execute()
@@ -304,6 +321,10 @@ def _get_brand_db(brand_id: str) -> Optional[dict]:
                 obj = json.loads(pj) if isinstance(pj, str) else pj
                 if obj.get("__brand_config__"):
                     return obj
+                bp = obj.get("brand_profile") or {}
+                brand_name = obj.get("brand_name") or bp.get("brand_name") or brand_id
+                uid = obj.get("user_id") or row.get("user_id", "")
+                return {"id": brand_id, "brand_name": brand_name, "user_id": uid, "status": "active", "playlist_count": 1}
         return None
     except Exception as e:
         logger.warning("_get_brand_db failed: %s", e)
@@ -723,6 +744,8 @@ def _bg_soundboard(brand_id: str, tid: str):
         task_progress(tid, 10, "Analysing brand identity...")
         cc, dep = chat_client()
         inputs  = _pipeline_inputs(brand)
+        if inputs.get("website_url"):
+            inputs["scraped_content"] = scrape_brand_website(inputs["website_url"], 3000)
 
         bp = get_brand_profile(inputs, cc, dep)
         bp.setdefault("brand_name",           brand["brand_name"])
@@ -792,6 +815,8 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             task_progress(tid, 5, "Generating brand profile...")
             cc, dep = chat_client()
             inputs  = _apply_genre_overrides(_pipeline_inputs(brand))
+            if inputs.get("website_url"):
+                inputs["scraped_content"] = scrape_brand_website(inputs["website_url"], 3000)
             bp = get_brand_profile(inputs, cc, dep)
             bp.setdefault("brand_name",           brand["brand_name"])
             bp.setdefault("customer_description", brand.get("customer_description", ""))
@@ -1357,7 +1382,7 @@ def catalog_songs():
 # ─── Routes: Quick Analyze ────────────────────────────────────────────────────
 
 QUICK_ANALYZE_PROMPT = """\
-You are a brand strategist. Given a brand name, business category, and optional website, return ONLY a valid JSON object:
+You are a brand strategist. Given a brand name, business category, optional website URL, and optional scraped website content, return ONLY a valid JSON object:
 {
   "customer_segment": "budget"|"mid_range"|"premium"|"luxury",
   "age_min": int,
@@ -1367,19 +1392,30 @@ You are a brand strategist. Given a brand name, business category, and optional 
   "suggested_customer_types": ["type1", "type2", "type3", "type4", "type5"],
   "suggested_lifestyle": ["tag1", "tag2", "tag3", "tag4", "tag5"]
 }
-IMPORTANT: suggested_activities, suggested_customer_types, and suggested_lifestyle must be based on the BUSINESS CATEGORY only (e.g. hotel, cafe, retail) — not the brand name.
-The brand name is only used to infer customer_segment and brand_description.
-suggested_activities: 4-6 things customers typically do in this type of space (e.g. for hotel: "Check in and relax", "Dine at the restaurant", "Use pool or spa", "Attend meetings")
-suggested_customer_types: 4-6 types of people who visit this type of place (e.g. for hotel: "Business travelers", "Couples on holiday", "Families", "Solo travelers")
-suggested_lifestyle: 4-6 lifestyle descriptors typical for this type of venue (e.g. for hotel: "Urban professional", "Leisure traveler", "Health-conscious")"""
+
+Rules:
+- customer_segment, brand_description: infer from brand name, website content (if provided), and category.
+- suggested_activities: 4-6 things customers typically do at/with this brand. If website content is provided, make these SPECIFIC to this brand's actual context (e.g. for a wedding wear brand: "Shopping for wedding outfits", "Attending a fitting session", "Gifting occasion wear"). Otherwise fall back to category-level examples.
+- suggested_customer_types: 4-6 types of people who visit this brand. If website content is provided, make these SPECIFIC to the actual customer base. Otherwise use category defaults.
+- suggested_lifestyle: 4-6 lifestyle descriptors. If website content is provided, tailor to this brand's identity. Otherwise use category defaults.
+
+When website content is available, prefer brand-specific suggestions over generic category defaults."""
 
 
 @protected_router.post("/api/quick-analyze")
 async def quick_analyze(req: Request):
+    import asyncio
     data = await req.json()
     brand_name  = data.get("brand_name", "")
     website_url = data.get("website_url", "")
     category    = data.get("category", "")
+
+    scraped = await asyncio.to_thread(scrape_brand_website, website_url, 2000)
+
+    user_msg = f"Brand: {brand_name}\nCategory: {category or 'not provided'}\nWebsite: {website_url or 'not provided'}"
+    if scraped:
+        user_msg += f"\n\n=== SCRAPED WEBSITE CONTENT ===\n{scraped}\n=== END ==="
+
     try:
         cc, dep = chat_client()
         resp = cc.chat.completions.create(
@@ -1388,7 +1424,7 @@ async def quick_analyze(req: Request):
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": QUICK_ANALYZE_PROMPT},
-                {"role": "user",   "content": f"Brand: {brand_name}\nCategory: {category or 'not provided'}\nWebsite: {website_url or 'not provided'}"},
+                {"role": "user",   "content": user_msg},
             ],
         )
         return json.loads(resp.choices[0].message.content)
