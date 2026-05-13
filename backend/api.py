@@ -192,70 +192,95 @@ def _save(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+_BRAND_META_KEYS = (
+    "id","user_id","brand_name","category","website_url","brand_description",
+    "visitor_activity","customer_types","lifestyle_tags","customer_segment",
+    "age_min","age_max","include_genres","exclude_genres","include_artists",
+    "exclude_artists","filter_explicit","song_type_filter","labels","music_notes",
+    "has_brand_guidelines","status","playlist_count","last_updated",
+    "last_generated_at","playlist_name","sound_board_result","customer_description",
+)
+
 def _get_brands_db(uid: str = None) -> dict:
-    """Read brands from user_playlist_songs.brand_json. Returns {brand_id: brand_json}.
-    Paginates to work around Supabase's default 1000-row limit.
-    Falls back to brand_name column when brand_json.brand_name is missing (SQL backfill gap)."""
+    """Read brands from brand_playlists (one row per brand) — single query.
+    Falls back to user_playlist_songs for old records missing embedded metadata."""
+    seen: dict = {}
+    needs_backfill: list = []
+
     try:
-        seen: dict = {}
-        page_size = 1000
-        offset = 0
-        while True:
-            query = get_supabase().table("user_playlist_songs") \
-                .select("brand_id,brand_json,brand_name") \
-                .not_.is_("brand_json", "null")
-            if uid:
-                query = query.eq("user_id", uid)
-            batch = query.range(offset, offset + page_size - 1).execute().data or []
-            for row in batch:
-                bid = row.get("brand_id")
-                if bid and bid not in seen and row.get("brand_json"):
-                    bj = row["brand_json"]
-                    # Patch brand_name from column if brand_json.brand_name is missing
-                    col_name = row.get("brand_name") or ""
-                    if not bj.get("brand_name") and col_name:
-                        bj = dict(bj)
-                        bj["brand_name"] = col_name
-                        if not bj.get("playlist_name"):
-                            bj["playlist_name"] = col_name
-                    seen[bid] = bj
-            if len(batch) < page_size:
-                break
-            offset += page_size
-        # Also surface new brands stored in brand_playlists before first playlist
-        try:
-            bp_q = get_supabase().table("brand_playlists") \
-                .select("brand_id,user_id,playlist_json") \
-                .not_.is_("playlist_json", "null")
-            if uid:
-                bp_q = bp_q.eq("user_id", uid)
-            for row in (bp_q.execute().data or []):
-                bid = row.get("brand_id")
-                if not bid:
-                    continue
-                pj = row.get("playlist_json")
-                obj = (json.loads(pj) if isinstance(pj, str) else pj) if pj else {}
-                bp = obj.get("brand_profile") or {}
-                resolved_name = obj.get("brand_name") or bp.get("brand_name") or ""
-                if bid not in seen:
-                    if obj.get("__brand_config__"):
-                        seen[bid] = obj
-                    else:
-                        seen[bid] = {
-                            "id":             bid,
-                            "brand_name":     resolved_name or bid,
-                            "user_id":        row.get("user_id", ""),
-                            "status":         "active",
-                            "playlist_count": 1,
-                        }
-                elif not seen[bid].get("brand_name") and resolved_name:
-                    seen[bid] = {**seen[bid], "brand_name": resolved_name}
-        except Exception as e2:
-            logger.warning("_get_brands_db bp fallback failed: %s", e2)
-        return seen
+        q = get_supabase().table("brand_playlists").select("brand_id,user_id,playlist_json")
+        if uid:
+            q = q.eq("user_id", uid)
+        for row in (q.execute().data or []):
+            bid = row.get("brand_id")
+            if not bid:
+                continue
+            pj = row.get("playlist_json")
+            obj = (json.loads(pj) if isinstance(pj, str) else pj) if pj else {}
+            if not obj:
+                continue
+            bp  = obj.get("brand_profile") or {}
+            is_config = bool(obj.get("__brand_config__"))
+            seen[bid] = {
+                "id":                   bid,
+                "user_id":              row.get("user_id") or obj.get("user_id", ""),
+                "brand_name":           obj.get("brand_name") or bp.get("brand_name") or bid,
+                "category":             obj.get("category", ""),
+                "status":               obj.get("status", "active"),
+                "playlist_count":       0 if is_config else obj.get("playlist_count", 1),
+                "last_updated":         obj.get("last_updated"),
+                "last_generated_at":    obj.get("last_generated_at"),
+                "playlist_name":        obj.get("playlist_name") or obj.get("brand_name") or bp.get("brand_name") or bid,
+                "sound_board_result":   obj.get("sound_board_result") or (obj.get("sound_board") if not is_config else None),
+                "brand_description":    obj.get("brand_description") or bp.get("brand_summary", ""),
+                "customer_description": obj.get("customer_description", ""),
+                "visitor_activity":     obj.get("visitor_activity", []),
+                "customer_types":       obj.get("customer_types", []),
+                "lifestyle_tags":       obj.get("lifestyle_tags", []),
+                "customer_segment":     obj.get("customer_segment") or bp.get("price_positioning", "mid_range"),
+                "age_min":              obj.get("age_min") or bp.get("customer_age_min", 18),
+                "age_max":              obj.get("age_max") or bp.get("customer_age_max", 65),
+                "include_genres":       obj.get("include_genres", []),
+                "exclude_genres":       obj.get("exclude_genres", []),
+                "include_artists":      obj.get("include_artists", []),
+                "exclude_artists":      obj.get("exclude_artists", []),
+                "filter_explicit":      obj.get("filter_explicit", True),
+                "song_type_filter":     obj.get("song_type_filter"),
+                "labels":               obj.get("labels", []),
+                "music_notes":          obj.get("music_notes", ""),
+                "website_url":          obj.get("website_url", ""),
+                "has_brand_guidelines": obj.get("has_brand_guidelines", False),
+                "brand_profile":        bp,
+            }
+            # Old record: playlist_json has no embedded brand metadata — backfill from user_playlist_songs
+            if not is_config and not obj.get("category"):
+                needs_backfill.append(bid)
     except Exception as e:
-        logger.warning("_get_brands_db failed: %s", e)
-        return {}
+        logger.warning("_get_brands_db brand_playlists query failed: %s", e)
+
+    # Backfill missing metadata for old records (one targeted query per brand, runs until regenerated)
+    for bid in needs_backfill:
+        try:
+            r = get_supabase().table("user_playlist_songs") \
+                .select("brand_json,brand_name") \
+                .eq("brand_id", bid) \
+                .not_.is_("brand_json", "null") \
+                .limit(1).execute()
+            if r.data:
+                bj = r.data[0].get("brand_json") or {}
+                if isinstance(bj, str):
+                    bj = json.loads(bj)
+                col_name = r.data[0].get("brand_name") or ""
+                if not bj.get("brand_name") and col_name:
+                    bj["brand_name"] = col_name
+                for k, v in bj.items():
+                    if v and not seen[bid].get(k):
+                        seen[bid][k] = v
+                seen[bid].setdefault("id", bid)
+        except Exception as e2:
+            logger.warning("_get_brands_db backfill failed for %s: %s", bid, e2)
+
+    return seen
 
 
 def _save_brands_db(brands: dict):
@@ -614,6 +639,7 @@ def _pipeline_inputs(brand: dict) -> dict:
         "exclude_artists":      _as_str(exc_artists),
         "filter_explicit":      brand.get("filter_explicit", True),
         "song_type_filter":     brand.get("song_type_filter") or None,
+        "labels":               brand.get("labels", []),
         "music_notes":          brand.get("music_notes", ""),
         "asset_analysis":       brand.get("asset_analysis", ""),
         "has_brand_guidelines": brand.get("has_brand_guidelines", False),
@@ -745,7 +771,7 @@ def _bg_soundboard(brand_id: str, tid: str):
         cc, dep = chat_client()
         inputs  = _pipeline_inputs(brand)
         if inputs.get("website_url"):
-            inputs["scraped_content"] = scrape_brand_website(inputs["website_url"], 3000)
+            inputs["scraped_content"] = scrape_brand_website(inputs["website_url"])
 
         bp = get_brand_profile(inputs, cc, dep)
         bp.setdefault("brand_name",           brand["brand_name"])
@@ -776,7 +802,7 @@ def _bg_soundboard(brand_id: str, tid: str):
 
 # ─── Background: Playlist generation (MMR) ───────────────────────────────────
 
-def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None, song_type_filter: Optional[str] = None, artist_overrides: Optional[dict] = None):
+def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None, song_type_filter: Optional[str] = None, artist_overrides: Optional[dict] = None, labels: Optional[list] = None):
     try:
         brand = _get_brand_db(brand_id)
         if not brand:
@@ -816,7 +842,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             cc, dep = chat_client()
             inputs  = _apply_genre_overrides(_pipeline_inputs(brand))
             if inputs.get("website_url"):
-                inputs["scraped_content"] = scrape_brand_website(inputs["website_url"], 3000)
+                inputs["scraped_content"] = scrape_brand_website(inputs["website_url"])
             bp = get_brand_profile(inputs, cc, dep)
             bp.setdefault("brand_name",           brand["brand_name"])
             bp.setdefault("customer_description", brand.get("customer_description", ""))
@@ -837,6 +863,9 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         # Request-level song_type_filter overrides the brand-level default
         if song_type_filter:
             inputs["song_type_filter"] = song_type_filter.strip().lower()
+        # Request-level labels override the brand-level default
+        if labels:
+            inputs["labels"] = labels
         day_parts = sb_result.get("day_parts", [])
 
         include_list       = [a.strip() for a in (inputs.get("include_artists") or "").split(",") if a.strip()]
@@ -953,6 +982,24 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         user_id = brand.get("user_id")
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # Update brand metadata before saving so both tables stay in sync
+        is_first = brand.get("playlist_count", 0) == 0
+        brand["playlist_count"]    = brand.get("playlist_count", 0) + 1
+        brand["last_updated"]      = now_iso
+        brand["last_generated_at"] = now_iso
+        brand["status"]            = "active"
+        if playlist_name and is_first:
+            brand["playlist_name"] = playlist_name.strip()
+        elif not brand.get("playlist_name"):
+            brand["playlist_name"] = brand.get("brand_name", "")
+
+        # Embed brand metadata into playlist_result so brand_playlists is the single source for listing
+        for _k in _BRAND_META_KEYS:
+            if _k in brand:
+                playlist_result[_k] = brand[_k]
+        playlist_result["id"]      = brand_id
+        playlist_result["user_id"] = user_id
+
         # ── Save playlist to Supabase ─────────────────────────────────────────
         _save_playlist_db(brand_id, user_id, playlist_result)
         logger.info("Playlist saved to brand_playlists (brand=%s)", brand_id)
@@ -982,16 +1029,6 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                 except Exception as e:
                     logger.warning("Could not sync playlist songs to Supabase: %s", e)
 
-        is_first = brand.get("playlist_count", 0) == 0
-        now_iso = datetime.now(timezone.utc).isoformat()
-        brand["playlist_count"]    = brand.get("playlist_count", 0) + 1
-        brand["last_updated"]      = now_iso
-        brand["last_generated_at"] = now_iso
-        brand["status"]            = "active"
-        if playlist_name and is_first:
-            brand["playlist_name"] = playlist_name.strip()
-        elif not brand.get("playlist_name"):
-            brand["playlist_name"] = brand.get("brand_name", "")
         save_brands({brand_id: brand})
 
         log_activity("Playlists generated (MMR)", brand["brand_name"])
@@ -1057,8 +1094,7 @@ def activity():
 @protected_router.get("/api/brands")
 def list_brands(user: dict = Depends(get_current_user)):
     uid = user["id"]
-    brands = list(get_brands(uid).values())
-    return _reconcile_playlist_counts(uid, brands)
+    return list(get_brands(uid).values())
 
 
 @protected_router.post("/api/brands")
@@ -1090,6 +1126,7 @@ async def create_brand(req: Request, user: dict = Depends(get_current_user)):
         "exclude_artists":      data.get("exclude_artists", []),
         "filter_explicit":      data.get("filter_explicit", True),
         "song_type_filter":     data.get("song_type_filter") or None,
+        "labels":               data.get("labels", []),
         "music_notes":          data.get("music_notes", ""),
         "asset_analysis":       data.get("asset_analysis", ""),
         "has_brand_guidelines": data.get("has_brand_guidelines", False),
@@ -1316,13 +1353,19 @@ async def upload_assets(brand_id: str, files: list[UploadFile] = File(...), user
 
 # ─── Routes: Catalog ──────────────────────────────────────────────────────────
 
+_BANNED_GENRE_KEYWORDS = {"christmas", "wedding", "bollywood", "diwali", "festival"}
+
 @protected_router.get("/api/catalog/genres")
 def catalog_genres():
     """Return distinct genres present in the songs catalog, sorted alphabetically."""
     try:
         from backend.db import fetch_all_songs as _fetch
         songs = _fetch()
-        genres = sorted({s.get("genre") for s in songs if s.get("genre")})
+        genres = sorted({
+            s.get("genre") for s in songs
+            if s.get("genre")
+            and not any(kw in (s.get("genre") or "").lower() for kw in _BANNED_GENRE_KEYWORDS)
+        })
         return {"genres": genres}
     except Exception as e:
         return {"genres": [], "error": str(e)}
@@ -1382,7 +1425,7 @@ def catalog_songs():
 # ─── Routes: Quick Analyze ────────────────────────────────────────────────────
 
 QUICK_ANALYZE_PROMPT = """\
-You are a brand strategist. Given a brand name, business category, optional website URL, and optional scraped website content, return ONLY a valid JSON object:
+You are a brand strategist. Given a brand name, optional website URL, optional scraped website content, and a space type (used only to understand the physical environment), return ONLY a valid JSON object:
 {
   "customer_segment": "budget"|"mid_range"|"premium"|"luxury",
   "age_min": int,
@@ -1394,13 +1437,24 @@ You are a brand strategist. Given a brand name, business category, optional webs
 }
 
 Rules:
-- customer_segment, brand_description: infer from brand name, website content (if provided), and category.
-- suggested_activities: 4-6 things customers typically do at/with this brand. If website content is provided, make these SPECIFIC to this brand's actual context (e.g. for a wedding wear brand: "Shopping for wedding outfits", "Attending a fitting session", "Gifting occasion wear"). Otherwise fall back to category-level examples.
-- suggested_customer_types: 4-6 types of people who visit this brand. If website content is provided, make these SPECIFIC to the actual customer base. Otherwise use category defaults.
-- suggested_lifestyle: 4-6 lifestyle descriptors. If website content is provided, tailor to this brand's identity. Otherwise use category defaults.
+- suggested_activities, suggested_customer_types, suggested_lifestyle: derive these ENTIRELY from the brand name and scraped website content. These must reflect what this specific brand actually sells, does, and who its actual customers are — NOT generic examples from the space type.
+- If scraped content is available, it is the primary source of truth. Ignore the space type entirely for these three fields.
+- Only fall back to space-type-level defaults for these fields when NO scraped content is available AND the brand name gives no strong signal.
+- customer_segment, brand_description: infer from brand name, website content, and space type as supporting context.
+- Examples of correct behavior: a brand named "Fabindia" with content about ethnic Indian clothing → activities about browsing kurtas/sarees/ethnic wear, NOT footwear. A brand named "Nike" in a fashion space → athletic wear, sports, performance — NOT generic fashion browsing."""
 
-When website content is available, prefer brand-specific suggestions over generic category defaults."""
 
+CATEGORY_LABELS = {
+    "fashion_footwear":  "Fashion & Apparel Retail",
+    "jewelry":           "Jewelry & Luxury Retail",
+    "cafe":              "Cafe & Coffee Shop",
+    "qsr":               "Quick Service Restaurant",
+    "fine_dine":         "Fine Dining Restaurant",
+    "supermarket":       "Supermarket & Grocery Store",
+    "hotel":             "Hotel & Hospitality",
+    "fitness_wellness":  "Fitness & Wellness Centre",
+    "electronics":       "Electronics & Tech Retail",
+}
 
 @protected_router.post("/api/quick-analyze")
 async def quick_analyze(req: Request):
@@ -1409,10 +1463,11 @@ async def quick_analyze(req: Request):
     brand_name  = data.get("brand_name", "")
     website_url = data.get("website_url", "")
     category    = data.get("category", "")
+    space_type  = CATEGORY_LABELS.get(category, category) if category else "not provided"
 
-    scraped = await asyncio.to_thread(scrape_brand_website, website_url, 2000)
+    scraped = await asyncio.to_thread(scrape_brand_website, website_url)
 
-    user_msg = f"Brand: {brand_name}\nCategory: {category or 'not provided'}\nWebsite: {website_url or 'not provided'}"
+    user_msg = f"Brand: {brand_name}\nSpace type: {space_type}\nWebsite: {website_url or 'not provided'}"
     if scraped:
         user_msg += f"\n\n=== SCRAPED WEBSITE CONTENT ===\n{scraped}\n=== END ==="
 
@@ -1457,6 +1512,7 @@ class GenerateRequest(BaseModel):
     artist_overrides: ArtistOverrides = ArtistOverrides()
     playlist_name: Optional[str] = None
     song_type_filter: Optional[str] = None
+    labels: list[str] = []
 
 @protected_router.post("/api/generate/{brand_id}")
 def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest(), user: dict = Depends(get_current_user)):
@@ -1465,7 +1521,7 @@ def start_generate(brand_id: str, req: GenerateRequest = GenerateRequest(), user
         raise HTTPException(404, "Brand not found")
     tid = new_task()
     logger.warning("generate called: brand=%s genre_overrides=%s artist_overrides=%s", brand_id, req.genre_overrides.model_dump(), req.artist_overrides.model_dump())
-    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump(), req.playlist_name, req.song_type_filter, req.artist_overrides.model_dump()), daemon=True).start()
+    threading.Thread(target=_bg_playlist, args=(brand_id, tid, req.genre_overrides.model_dump(), req.playlist_name, req.song_type_filter, req.artist_overrides.model_dump(), req.labels), daemon=True).start()
     return {"task_id": tid}
 
 
@@ -1924,11 +1980,9 @@ def app_init(
 ):
     """Single bootstrap call: returns user info + brands in one round trip."""
     uid = user["id"]
-    brands = list(get_brands(uid).values())
-    brands = _reconcile_playlist_counts(uid, brands)
     return {
         "user":   {"id": uid, "email": user.get("email", ""), "role": role},
-        "brands": brands,
+        "brands": list(get_brands(uid).values()),
     }
 
 

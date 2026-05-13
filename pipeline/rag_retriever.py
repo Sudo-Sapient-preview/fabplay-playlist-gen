@@ -38,6 +38,17 @@ def _has_playable_audio(track: dict) -> bool:
 
 # ─── Hard-filter helpers ──────────────────────────────────────────────────────
 
+# Genres/themes that must never appear in any generated playlist
+_BANNED_KEYWORDS = {"christmas", "wedding", "bollywood", "diwali", "festival"}
+
+
+def _is_banned(track: dict) -> bool:
+    """Return True if a track's genre or title contains a banned keyword."""
+    genre = (track.get("genre") or "").lower()
+    title = (track.get("title") or "").lower()
+    return any(kw in genre or kw in title for kw in _BANNED_KEYWORDS)
+
+
 def _is_explicit_proxy(track: dict) -> bool:
     """
     Proxy heuristic for explicit content:
@@ -70,6 +81,8 @@ def _apply_hard_filters(
     exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit  = inputs.get("filter_explicit", True)
     song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
+    _LABEL_ARTISTS = {"AMU": "amurco", "FPO": "fabplay originals"}
+    label_filter = [_LABEL_ARTISTS[c.upper()] for c in (inputs.get("labels") or []) if c.upper() in _LABEL_ARTISTS]
 
     tempo_min  = day_part.get("tempo_min",  60)
     tempo_max  = day_part.get("tempo_max", 180)
@@ -80,6 +93,8 @@ def _apply_hard_filters(
 
     filtered = []
     for track in candidates:
+        if _is_banned(track):
+            continue
         artist = (track.get("artist") or "").lower()
         genre  = _norm_genre(track.get("genre"))
         tempo  = float(track.get("tempo_bpm", 120))
@@ -102,6 +117,10 @@ def _apply_hard_filters(
             track_type = (track.get("song_type") or "").strip().lower()
             if track_type and track_type != song_type_filter:
                 continue
+        if label_filter:
+            artist = (track.get("artist") or "").lower()
+            if not any(lbl in artist for lbl in label_filter):
+                continue
 
         filtered.append(track)
 
@@ -120,9 +139,13 @@ def _apply_exclusion_filters_only(
     exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit  = inputs.get("filter_explicit", True)
     song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
+    _LABEL_ARTISTS = {"AMU": "amurco", "FPO": "fabplay originals"}
+    label_filter = [_LABEL_ARTISTS[c.upper()] for c in (inputs.get("labels") or []) if c.upper() in _LABEL_ARTISTS]
 
     filtered = []
     for track in candidates:
+        if _is_banned(track):
+            continue
         artist = (track.get("artist") or "").lower()
         genre  = _norm_genre(track.get("genre"))
         if any(ea.lower() in artist for ea in exclude_artists if ea):
@@ -134,6 +157,9 @@ def _apply_exclusion_filters_only(
         if song_type_filter:
             track_type = (track.get("song_type") or "").strip().lower()
             if track_type and track_type != song_type_filter:
+                continue
+        if label_filter:
+            if not any(lbl in artist for lbl in label_filter):
                 continue
         filtered.append(track)
 

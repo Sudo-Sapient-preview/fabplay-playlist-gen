@@ -11,8 +11,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def scrape_brand_website(url: str, char_limit: int = 3000) -> str:
-    """Scrape a brand website via Firecrawl and return truncated markdown."""
+def scrape_brand_website(url: str, char_limit: int | None = None) -> str:
+    """Scrape a brand website via Firecrawl and return markdown. Pass char_limit to truncate."""
     if not url or not url.startswith(("http://", "https://")):
         return ""
     api_key = os.getenv("FIRECRAWL_API_KEY", "")
@@ -24,7 +24,7 @@ def scrape_brand_website(url: str, char_limit: int = 3000) -> str:
         app = FirecrawlApp(api_key=api_key)
         result = app.scrape_url(url, params={"formats": ["markdown"], "timeout": 15000})
         content = (result or {}).get("markdown", "") or ""
-        return content[:char_limit].strip()
+        return (content[:char_limit] if char_limit else content).strip()
     except Exception as e:
         logger.warning("Firecrawl scrape failed for %s: %s", url, e)
         return ""
