@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
-from backend.db import get_supabase, run_startup_checks, fetch_all_songs
+from backend.db import get_supabase, reset_supabase, run_startup_checks, fetch_all_songs
 from brand_pipeline.brand_analysis import get_brand_profile
 from brand_pipeline.web_scraper import scrape_brand_website
 from brand_pipeline.sound_board import get_sound_board, apply_segment_adjustments
@@ -135,6 +135,8 @@ async def require_superadmin(role: str = Depends(get_current_role)):
 async def lifespan(app: FastAPI):
     run_startup_checks(exit_on_fatal=False)
     _migrate_local_brands_to_supabase()
+    # Warm song cache in background so first generation is instant
+    threading.Thread(target=fetch_all_songs, daemon=True).start()
     logger.info("fabPLAY MMR API ready on http://0.0.0.0:8001")
     yield
 
@@ -147,6 +149,63 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=
 public_router     = APIRouter()
 protected_router  = APIRouter(dependencies=[Depends(get_current_user)])
 superadmin_router = APIRouter(dependencies=[Depends(require_superadmin)])
+
+# ─── In-memory playlist cache ─────────────────────────────────────────────────
+_playlist_mem_cache: dict = {}  # playlist_id -> full playlist dict (with src resolved)
+_PLAYLIST_CACHE_MAX = 60
+
+def _pc_get(pid: str):
+    return _playlist_mem_cache.get(pid)
+
+def _pc_set(pid: str, data: dict):
+    _playlist_mem_cache.pop(pid, None)
+    if len(_playlist_mem_cache) >= _PLAYLIST_CACHE_MAX:
+        _playlist_mem_cache.pop(next(iter(_playlist_mem_cache)))
+    _playlist_mem_cache[pid] = data
+
+def _pc_del(pid: str):
+    _playlist_mem_cache.pop(pid, None)
+
+
+def _refresh_track_metadata(pl: dict) -> None:
+    """Re-fetch track metadata from the current songs table.
+
+    Updates genre, title, artist, and url for every track in the playlist.
+    Tracks whose song_id no longer exists in the catalog are removed — they
+    belong to a previous database and should not appear.
+    """
+    song_ids = [
+        str(t.get("song_id", ""))
+        for dp in pl.get("day_parts", [])
+        for t in dp.get("tracks", [])
+        if t.get("song_id")
+    ]
+    if not song_ids:
+        return
+    try:
+        rows = get_supabase().table("songs").select(
+            "id,title,artist,genre,url"
+        ).in_("id", song_ids).execute()
+        lookup = {str(r["id"]): r for r in (rows.data or [])}
+    except Exception:
+        return
+    if not lookup:
+        return
+    for dp in pl.get("day_parts", []):
+        refreshed = []
+        for t in dp.get("tracks", []):
+            sid = str(t.get("song_id", ""))
+            if sid not in lookup:
+                continue  # song doesn't exist in new catalog — drop it
+            s = lookup[sid]
+            t["genre"]  = s.get("genre")  or t.get("genre",  "")
+            t["title"]  = s.get("title")  or t.get("title",  "")
+            t["artist"] = s.get("artist") or t.get("artist", "")
+            t["url"]    = s.get("url")    or t.get("url",    "")
+            t["src"]    = s.get("url")    or t.get("src",    "")
+            refreshed.append(t)
+        dp["tracks"] = refreshed
+
 
 # ─── Song file resolver ───────────────────────────────────────────────────────
 
@@ -202,10 +261,13 @@ _BRAND_META_KEYS = (
 )
 
 def _get_brands_db(uid: str = None) -> dict:
-    """Read brands from brand_playlists (one row per brand) — single query.
+    """Read brands from brand_playlists — single query.
+    Config rows (brand metadata) and playlist rows (day_parts) are stored separately.
     Falls back to user_playlist_songs for old records missing embedded metadata."""
     seen: dict = {}
     needs_backfill: list = []
+    # Track real playlist count per brand (non-config rows with day_parts)
+    playlist_counts: dict = {}
 
     try:
         q = get_supabase().table("brand_playlists").select("brand_id,user_id,playlist_json")
@@ -221,16 +283,37 @@ def _get_brands_db(uid: str = None) -> dict:
                 continue
             bp  = obj.get("brand_profile") or {}
             is_config = bool(obj.get("__brand_config__"))
+            has_day_parts = bool(obj.get("day_parts"))
+
+            # Count actual playlist rows (not config rows)
+            if not is_config and has_day_parts:
+                playlist_counts[bid] = playlist_counts.get(bid, 0) + 1
+
+            # For brand metadata: config row takes priority; only use playlist row
+            # if no config row seen yet for this brand (backwards compat with old single rows)
+            if bid in seen and not is_config:
+                # Config row already written — just update last_generated_at if newer
+                existing = seen[bid]
+                lat = obj.get("last_generated_at") or obj.get("last_updated")
+                if lat and (not existing.get("last_generated_at") or lat > existing["last_generated_at"]):
+                    existing["last_generated_at"] = lat
+                continue
+
+            has_brand_data = (obj.get("brand_name") or bp.get("brand_name") or
+                              obj.get("sound_board") or is_config)
+            if not has_brand_data:
+                continue
+
             seen[bid] = {
                 "id":                   bid,
                 "user_id":              row.get("user_id") or obj.get("user_id", ""),
-                "brand_name":           obj.get("brand_name") or bp.get("brand_name") or bid,
+                "brand_name":           obj.get("brand_name") or bp.get("brand_name") or "Unnamed Playlist",
                 "category":             obj.get("category", ""),
                 "status":               obj.get("status", "active"),
-                "playlist_count":       0 if is_config else obj.get("playlist_count", 1),
+                "playlist_count":       0,  # filled in below from playlist_counts
                 "last_updated":         obj.get("last_updated"),
                 "last_generated_at":    obj.get("last_generated_at"),
-                "playlist_name":        obj.get("playlist_name") or obj.get("brand_name") or bp.get("brand_name") or bid,
+                "playlist_name":        obj.get("playlist_name") or obj.get("brand_name") or bp.get("brand_name") or "Unnamed Playlist",
                 "sound_board_result":   obj.get("sound_board_result") or (obj.get("sound_board") if not is_config else None),
                 "brand_description":    obj.get("brand_description") or bp.get("brand_summary", ""),
                 "customer_description": obj.get("customer_description", ""),
@@ -252,25 +335,38 @@ def _get_brands_db(uid: str = None) -> dict:
                 "has_brand_guidelines": obj.get("has_brand_guidelines", False),
                 "brand_profile":        bp,
             }
-            # Old record: playlist_json has no embedded brand metadata — backfill from user_playlist_songs
             if not is_config and not obj.get("category"):
                 needs_backfill.append(bid)
     except Exception as e:
         logger.warning("_get_brands_db brand_playlists query failed: %s", e)
+        if _is_disconnect(e):
+            reset_supabase()
 
-    # Backfill missing metadata for old records (one targeted query per brand, runs until regenerated)
-    for bid in needs_backfill:
+    # Apply accurate playlist counts
+    for bid, b in seen.items():
+        b["playlist_count"] = playlist_counts.get(bid, 0)
+
+    # Backfill missing metadata — single batch query instead of N individual queries
+    if needs_backfill:
         try:
-            r = get_supabase().table("user_playlist_songs") \
-                .select("brand_json,brand_name") \
-                .eq("brand_id", bid) \
+            rb = get_supabase().table("user_playlist_songs") \
+                .select("brand_id,brand_json,brand_name") \
+                .in_("brand_id", needs_backfill) \
                 .not_.is_("brand_json", "null") \
-                .limit(1).execute()
-            if r.data:
-                bj = r.data[0].get("brand_json") or {}
+                .execute()
+            seen_backfill: set = set()
+            for row in (rb.data or []):
+                bid = row.get("brand_id")
+                if not bid or bid in seen_backfill or bid not in seen:
+                    continue
+                seen_backfill.add(bid)
+                bj = row.get("brand_json") or {}
                 if isinstance(bj, str):
-                    bj = json.loads(bj)
-                col_name = r.data[0].get("brand_name") or ""
+                    try:
+                        bj = json.loads(bj)
+                    except Exception:
+                        continue
+                col_name = row.get("brand_name") or ""
                 if not bj.get("brand_name") and col_name:
                     bj["brand_name"] = col_name
                 for k, v in bj.items():
@@ -278,13 +374,13 @@ def _get_brands_db(uid: str = None) -> dict:
                         seen[bid][k] = v
                 seen[bid].setdefault("id", bid)
         except Exception as e2:
-            logger.warning("_get_brands_db backfill failed for %s: %s", bid, e2)
+            logger.warning("_get_brands_db backfill batch failed: %s", e2)
 
     return seen
 
 
 def _save_brands_db(brands: dict):
-    """Update brand_json in user_playlist_songs for every song row belonging to each brand."""
+    """Persist brand metadata to both user_playlist_songs and brand_playlists config row."""
     if not brands:
         return
     for bid, b in brands.items():
@@ -292,32 +388,40 @@ def _save_brands_db(brands: dict):
         if not uid:
             logger.warning("_save_brands_db skipping brand %s — missing user_id", bid)
             continue
+        # Update user_playlist_songs rows (keeps brand_json in sync for existing playlists)
         try:
-            result = get_supabase().table("user_playlist_songs") \
+            get_supabase().table("user_playlist_songs") \
                 .update({"brand_json": b}) \
                 .eq("brand_id", bid) \
                 .eq("user_id", uid) \
                 .execute()
-            # New brand: no playlist rows yet — store config in brand_playlists as fallback
-            if not (result.data or []):
-                try:
-                    get_supabase().table("brand_playlists").upsert({
-                        "brand_id":      bid,
-                        "user_id":       uid,
-                        "playlist_json": json.dumps({"__brand_config__": True, **b}),
-                        "updated_at":    datetime.now(timezone.utc).isoformat(),
-                    }, on_conflict="brand_id").execute()
-                except Exception as upsert_err:
-                    logger.warning("_save_brands_db brand_playlists upsert failed for %s: %s", bid, upsert_err)
         except Exception as e:
-            logger.warning("_save_brands_db failed for brand %s: %s", bid, e)
+            logger.warning("_save_brands_db user_playlist_songs update failed for %s: %s", bid, e)
+        # Always upsert brand_playlists config row (playlist_id = brand_id).
+        # _get_brands_db reads sound_board_result / brand_profile from here — it must stay current.
+        try:
+            get_supabase().table("brand_playlists").upsert({
+                "playlist_id":   bid,
+                "brand_id":      bid,
+                "user_id":       uid,
+                "playlist_json": json.dumps({"__brand_config__": True, **b}),
+                "track_count":   0,
+                "updated_at":    datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="playlist_id").execute()
+        except Exception as upsert_err:
+            logger.warning("_save_brands_db brand_playlists upsert failed for %s: %s", bid, upsert_err)
+
+
+def _is_disconnect(e: Exception) -> bool:
+    return any(kw in str(e).lower() for kw in ("disconnect", "server disconnected", "connection"))
 
 
 def _get_brand_db(brand_id: str) -> Optional[dict]:
     """Fetch brand config for a single brand.
     Primary: user_playlist_songs.brand_json (brands with playlists).
     Fallback: brand_playlists (new brands stored before first playlist)."""
-    try:
+    for attempt in range(2):
+      try:
         r = get_supabase().table("user_playlist_songs") \
             .select("brand_json,brand_name") \
             .eq("brand_id", brand_id) \
@@ -334,12 +438,23 @@ def _get_brand_db(brand_id: str) -> Optional[dict]:
                 if not bj.get("playlist_name"):
                     bj["playlist_name"] = col_name
             return bj
-        # Fallback: brand may exist in brand_playlists before any playlist is generated
+        # Fallback: brand may exist in brand_playlists before any playlist is generated.
+        # Always fetch the config row first (playlist_id = brand_id, set by migration).
+        # Without this guarantee a playlist row might be returned, which has no brand metadata.
         r2 = get_supabase().table("brand_playlists") \
             .select("user_id,playlist_json") \
             .eq("brand_id", brand_id) \
+            .eq("playlist_id", brand_id) \
             .limit(1) \
             .execute()
+        if not (r2.data or []):
+            # Config row doesn't exist yet — fall back to any row for this brand
+            r2 = get_supabase().table("brand_playlists") \
+                .select("user_id,playlist_json") \
+                .eq("brand_id", brand_id) \
+                .order("updated_at", desc=True) \
+                .limit(1) \
+                .execute()
         for row in (r2.data or []):
             pj = row.get("playlist_json")
             if pj:
@@ -351,9 +466,14 @@ def _get_brand_db(brand_id: str) -> Optional[dict]:
                 uid = obj.get("user_id") or row.get("user_id", "")
                 return {"id": brand_id, "brand_name": brand_name, "user_id": uid, "status": "active", "playlist_count": 1}
         return None
-    except Exception as e:
+      except Exception as e:
+        if attempt == 0 and _is_disconnect(e):
+            logger.warning("_get_brand_db: disconnect on attempt 1, reconnecting...")
+            reset_supabase()
+            continue
         logger.warning("_get_brand_db failed: %s", e)
         return None
+    return None
 
 
 def _migrate_local_brands_to_supabase():
@@ -382,32 +502,145 @@ def save_brands(brands: dict):
 # ─── Supabase playlist helpers ────────────────────────────────────────────────
 
 def _get_playlist_db(brand_id: str) -> Optional[dict]:
-    """Read a single brand's playlist from Supabase."""
+    """Read the latest playlist for a brand from Supabase."""
     try:
         r = get_supabase().table("brand_playlists") \
             .select("playlist_json") \
             .eq("brand_id", brand_id) \
-            .maybe_single() \
+            .order("updated_at", desc=True) \
+            .limit(1) \
             .execute()
         if r and r.data:
-            raw = r.data["playlist_json"]
+            raw = r.data[0]["playlist_json"]
             return json.loads(raw) if isinstance(raw, str) else raw
     except Exception as e:
         logger.warning("_get_playlist_db failed for %s: %s", brand_id, e)
     return None
 
 
-def _save_playlist_db(brand_id: str, user_id: str, playlist_json: dict):
-    """Upsert a brand's playlist to Supabase."""
-    get_supabase().table("brand_playlists").upsert(
-        {
-            "brand_id":      brand_id,
-            "user_id":       user_id,
-            "playlist_json": playlist_json,
-            "updated_at":    datetime.now(timezone.utc).isoformat(),
-        },
-        on_conflict="brand_id",
-    ).execute()
+def _get_playlist_by_id_db(playlist_id: str) -> Optional[dict]:
+    """Read a specific playlist by playlist_id (falls back to brand_id for old rows)."""
+    # Try playlist_id column first (only exists after migration)
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_json") \
+            .eq("playlist_id", playlist_id) \
+            .maybe_single() \
+            .execute()
+        if r and r.data:
+            raw = r.data["playlist_json"]
+            return json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        pass
+    # Fallback: playlist_id is actually brand_id (old rows without migration)
+    return _get_playlist_db(playlist_id)
+
+
+def _save_playlist_db(brand_id: str, user_id: str, playlist_json: dict, playlist_name: str = None) -> str:
+    """Upsert a playlist row. Reuses existing playlist_id if present, else generates one."""
+    import uuid as _uuid
+    existing_pid = playlist_json.get("playlist_id")
+    playlist_id = existing_pid if (existing_pid and existing_pid != brand_id) else str(_uuid.uuid4())
+    pname = (playlist_name or playlist_json.get("playlist_name") or "").strip()
+    # Mutate in-place so callers (brand["sound_board_result"]) retain the id on subsequent saves
+    playlist_json["playlist_id"]   = playlist_id
+    playlist_json["playlist_name"] = pname
+    tc = sum(len(dp.get("tracks", [])) for dp in playlist_json.get("day_parts") or [])
+    _pc_set(playlist_id, playlist_json)  # warm cache so first fetch after generation is instant
+    try:
+        get_supabase().table("brand_playlists").upsert(
+            {
+                "playlist_id":   playlist_id,
+                "brand_id":      brand_id,
+                "user_id":       user_id,
+                "playlist_json": playlist_json,
+                "playlist_name": pname,
+                "track_count":   tc,
+                "updated_at":    datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="playlist_id",
+        ).execute()
+        return playlist_id
+    except Exception:
+        # Old schema fallback (no playlist_id column)
+        get_supabase().table("brand_playlists").upsert(
+            {
+                "brand_id":      brand_id,
+                "user_id":       user_id,
+                "playlist_json": playlist_json,
+                "updated_at":    datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="brand_id",
+        ).execute()
+        return brand_id
+
+
+def _get_brand_playlists_db(brand_id: str) -> list[dict]:
+    """Return all generated playlists for a brand (newest first) — metadata only.
+
+    Three-tier query: each tier avoids loading the full playlist_json blob.
+    Tier 1 (fastest): track_count column exists → pure metadata, no JSON.
+    Tier 2 (fast):    only playlist_id/playlist_name columns → no JSON, tc=0.
+    Tier 3 (slow):    playlist_json needed (pre-migration schema).
+    """
+    def _rows_to_result(rows, brand_id, default_tc=None):
+        out = []
+        for row in (rows or []):
+            pid = row.get("playlist_id")
+            if not pid or pid == brand_id:
+                continue
+            pname = (row.get("playlist_name") or "Unnamed Playlist").strip()
+            tc = row.get("track_count") if default_tc is None else default_tc
+            out.append({"playlist_id": pid, "playlist_name": pname,
+                        "updated_at": row.get("updated_at"), "track_count": tc or 0})
+        return out
+
+    # Tier 1 — no JSON blob, track_count column exists (post-migration)
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_id,playlist_name,updated_at,track_count") \
+            .eq("brand_id", brand_id) \
+            .order("updated_at", desc=True) \
+            .execute()
+        return _rows_to_result(r.data, brand_id)
+    except Exception:
+        pass
+
+    # Tier 2 — no JSON blob, no track_count column (migration not fully run)
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_id,playlist_name,updated_at") \
+            .eq("brand_id", brand_id) \
+            .order("updated_at", desc=True) \
+            .execute()
+        return _rows_to_result(r.data, brand_id, default_tc=0)
+    except Exception:
+        pass
+
+    # Tier 3 — full playlist_json fallback (very old schema, one row per brand)
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_id,playlist_name,updated_at,playlist_json") \
+            .eq("brand_id", brand_id) \
+            .order("updated_at", desc=True) \
+            .execute()
+        result = []
+        for row in (r.data or []):
+            raw = row.get("playlist_json")
+            pj = (json.loads(raw) if isinstance(raw, str) else raw) or {}
+            if pj.get("__brand_config__"):
+                continue
+            pid = row.get("playlist_id") or pj.get("playlist_id")
+            if not pid or pid == brand_id:
+                continue
+            pname = (row.get("playlist_name") or pj.get("playlist_name") or "Unnamed Playlist").strip()
+            tc = sum(len(dp.get("tracks", [])) for dp in pj.get("day_parts") or [])
+            result.append({"playlist_id": pid, "playlist_name": pname,
+                           "updated_at": row.get("updated_at"), "track_count": tc})
+        return result
+    except Exception as e:
+        logger.warning("_get_brand_playlists_db failed for %s: %s", brand_id, e)
+        return []
 
 
 def _delete_playlist_db(brand_id: str):
@@ -510,11 +743,12 @@ def task_log(tid: str, msg: str):
     if t: t["log"].append(msg)
 
 
-def task_done(tid: str):
+def task_done(tid: str, **extra):
     t = _tasks.get(tid)
     if t:
         t["status"]   = "done"
         t["progress"] = 100
+        t.update(extra)
 
 
 def task_error(tid: str, msg: str):
@@ -605,6 +839,7 @@ def _fmt_daypart(dp: dict, playlist: list[dict]) -> dict:
         "speechiness_target":     dp.get("speechiness_target",     0.2),
         "speechiness_min":        dp.get("speechiness_min",        0.0),
         "speechiness_max":        dp.get("speechiness_max",        1.0),
+        "song_type_filter":       dp.get("song_type_filter", None),
         "track_count":            len(tracks),
         "total_duration_seconds": round(dur),
         "avg_bfs":                avg_mmr,
@@ -771,7 +1006,11 @@ def _bg_soundboard(brand_id: str, tid: str):
         cc, dep = chat_client()
         inputs  = _pipeline_inputs(brand)
         if inputs.get("website_url"):
-            inputs["scraped_content"] = scrape_brand_website(inputs["website_url"])
+            # Use cached scraped content; only re-scrape if not already stored
+            cached_scrape = brand.get("scraped_content", "")
+            inputs["scraped_content"] = cached_scrape or scrape_brand_website(inputs["website_url"])
+            if not cached_scrape and inputs["scraped_content"]:
+                brand["scraped_content"] = inputs["scraped_content"]
 
         bp = get_brand_profile(inputs, cc, dep)
         bp.setdefault("brand_name",           brand["brand_name"])
@@ -804,6 +1043,7 @@ def _bg_soundboard(brand_id: str, tid: str):
 
 def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None, playlist_name: Optional[str] = None, song_type_filter: Optional[str] = None, artist_overrides: Optional[dict] = None, labels: Optional[list] = None):
     try:
+        task_progress(tid, 2, "Loading brand...")
         brand = _get_brand_db(brand_id)
         if not brand:
             task_error(tid, f"Brand {brand_id} not found"); return
@@ -842,7 +1082,10 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             cc, dep = chat_client()
             inputs  = _apply_genre_overrides(_pipeline_inputs(brand))
             if inputs.get("website_url"):
-                inputs["scraped_content"] = scrape_brand_website(inputs["website_url"])
+                cached_scrape = brand.get("scraped_content", "")
+                inputs["scraped_content"] = cached_scrape or scrape_brand_website(inputs["website_url"])
+                if not cached_scrape and inputs["scraped_content"]:
+                    brand["scraped_content"] = inputs["scraped_content"]
             bp = get_brand_profile(inputs, cc, dep)
             bp.setdefault("brand_name",           brand["brand_name"])
             bp.setdefault("customer_description", brand.get("customer_description", ""))
@@ -860,12 +1103,14 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
 
         task_progress(tid, 30, "Starting MMR selection...")
         inputs    = _apply_artist_overrides(_apply_genre_overrides(_pipeline_inputs(brand)))
-        # Request-level song_type_filter overrides the brand-level default
+        # Request-level song_type_filter overrides the brand-level default; 'mixed' = no filter
         if song_type_filter:
-            inputs["song_type_filter"] = song_type_filter.strip().lower()
+            stf = song_type_filter.strip().lower()
+            inputs["song_type_filter"] = None if stf == "mixed" else stf
         # Request-level labels override the brand-level default
         if labels:
             inputs["labels"] = labels
+        logger.warning("[generate] brand=%s labels=%s", brand_id, inputs.get("labels"))
         day_parts = sb_result.get("day_parts", [])
 
         include_list       = [a.strip() for a in (inputs.get("include_artists") or "").split(",") if a.strip()]
@@ -883,10 +1128,19 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             pct = 30 + int((idx / n) * 65)
             task_progress(tid, pct, f"Running MMR for {dp_name}...")
 
+            # Per-day-part song_type_filter overrides the global one
+            dp_stf = dp.get("song_type_filter")
+            if dp_stf:
+                dp_inputs = dict(inputs)
+                stf_clean = dp_stf.strip().lower()
+                dp_inputs["song_type_filter"] = None if stf_clean == "mixed" else stf_clean
+            else:
+                dp_inputs = inputs
+
             candidates, all_playable, stats = retrieve_candidates(
                 brand_profile   = bp,
                 day_part_params = dp,
-                inputs          = inputs,
+                inputs          = dp_inputs,
                 used_song_ids   = used_song_ids,
             )
 
@@ -960,6 +1214,26 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
 
             assembled.append(_fmt_daypart(dp, playlist))
 
+        total_tracks = sum(len(dp.get("tracks", [])) for dp in assembled)
+        if total_tracks == 0:
+            from backend.db import fetch_all_songs as _fas
+            from pipeline.rag_retriever import _has_playable_audio as _hpa, _apply_exclusion_filters_only as _aef
+            all_s = _fas()
+            playable_count = sum(1 for s in all_s if _hpa(s))
+            after_filters  = len(_aef(all_s, inputs))
+            labels_used  = inputs.get("labels") or []
+            inc_genres   = inputs.get("include_genres") or ""
+            exc_genres   = inputs.get("exclude_genres") or ""
+            hint = f" Catalog: {playable_count} playable songs, {after_filters} after filters."
+            if labels_used:
+                hint += f" Label filter ({', '.join(labels_used)}) may have no matching songs."
+            if inc_genres:
+                hint += f" Included genres ({inc_genres}) may not match catalog."
+            if exc_genres:
+                hint += f" Excluded genres ({exc_genres}) may have removed all songs."
+            task_error(tid, f"Playlist generated 0 tracks — no songs matched the filters.{hint}")
+            return
+
         sb = sb_result.get("sound_board", {})
         playlist_result = {
             "brand_profile": bp,
@@ -983,15 +1257,13 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Update brand metadata before saving so both tables stay in sync
-        is_first = brand.get("playlist_count", 0) == 0
         brand["playlist_count"]    = brand.get("playlist_count", 0) + 1
         brand["last_updated"]      = now_iso
         brand["last_generated_at"] = now_iso
         brand["status"]            = "active"
-        if playlist_name and is_first:
-            brand["playlist_name"] = playlist_name.strip()
-        elif not brand.get("playlist_name"):
-            brand["playlist_name"] = brand.get("brand_name", "")
+        # playlist_name: use provided name, else existing brand name, else brand_name
+        pname = (playlist_name or "").strip() or brand.get("playlist_name") or brand.get("brand_name", "")
+        brand["playlist_name"] = pname
 
         # Embed brand metadata into playlist_result so brand_playlists is the single source for listing
         for _k in _BRAND_META_KEYS:
@@ -1000,9 +1272,16 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
         playlist_result["id"]      = brand_id
         playlist_result["user_id"] = user_id
 
-        # ── Save playlist to Supabase ─────────────────────────────────────────
-        _save_playlist_db(brand_id, user_id, playlist_result)
-        logger.info("Playlist saved to brand_playlists (brand=%s)", brand_id)
+        # ── Save playlist to Supabase (upserts by playlist_id) ──────────────
+        try:
+            _save_playlist_db(brand_id, user_id, playlist_result, pname)
+        except Exception as _save_err:
+            logger.warning("Playlist DB save failed (brand=%s): %s — proceeding with in-memory result", brand_id, _save_err)
+            import uuid as _uuid2
+            if not playlist_result.get("playlist_id"):
+                playlist_result["playlist_id"] = str(_uuid2.uuid4())
+        saved_playlist_id = playlist_result.get("playlist_id", "")
+        logger.info("Playlist saved to brand_playlists (brand=%s playlist=%s)", brand_id, saved_playlist_id)
 
         # ── Sync flat song list to user_playlist_songs ─────────────────────────
         if user_id:
@@ -1033,7 +1312,7 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
 
         log_activity("Playlists generated (MMR)", brand["brand_name"])
         task_progress(tid, 100, "All playlists ready.")
-        task_done(tid)
+        task_done(tid, playlist_id=saved_playlist_id)
 
     except Exception as e:
         logger.exception("Playlist generation failed")
@@ -1095,6 +1374,109 @@ def activity():
 def list_brands(user: dict = Depends(get_current_user)):
     uid = user["id"]
     return list(get_brands(uid).values())
+
+
+@protected_router.get("/api/user/playlists")
+def list_all_user_playlists(user: dict = Depends(get_current_user)):
+    """One DB query: returns metadata + full playlist data for all user playlists.
+    Warms the backend in-memory cache so subsequent individual fetches are instant."""
+    uid = user["id"]
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("brand_id,playlist_id,playlist_name,updated_at,track_count,playlist_json") \
+            .eq("user_id", uid) \
+            .gt("track_count", 0) \
+            .order("updated_at", desc=True) \
+            .execute()
+        by_brand: dict = {}
+        for row in (r.data or []):
+            bid = row.get("brand_id")
+            pid = row.get("playlist_id")
+            if not bid or not pid or pid == bid:
+                continue
+            raw = row.get("playlist_json")
+            pj = (json.loads(raw) if isinstance(raw, str) else raw) or {}
+            if pj.get("__brand_config__"):
+                continue
+            for dp in pj.get("day_parts", []):
+                for t in dp.get("tracks", []):
+                    t["src"] = _resolve_track_src(t)
+            _pc_set(pid, pj)  # warm backend mem cache
+            by_brand.setdefault(bid, []).append({
+                "playlist_id":   pid,
+                "playlist_name": (row.get("playlist_name") or pj.get("playlist_name") or "Unnamed Playlist").strip(),
+                "updated_at":    row.get("updated_at"),
+                "track_count":   row.get("track_count") or sum(len(dp.get("tracks",[]))for dp in pj.get("day_parts") or []),
+                "playlist_data": pj,
+            })
+        return JSONResponse({"ok": True, "playlists_by_brand": by_brand})
+    except Exception as e:
+        logger.warning("list_all_user_playlists failed: %s", e)
+        return JSONResponse({"ok": False, "playlists_by_brand": {}})
+
+
+@protected_router.get("/api/brands/{brand_id}/playlists")
+def list_brand_playlists(brand_id: str, user: dict = Depends(get_current_user)):
+    return JSONResponse({"ok": True, "playlists": _get_brand_playlists_db(brand_id)})
+
+
+@protected_router.delete("/api/playlists/{playlist_id}")
+async def delete_individual_playlist(playlist_id: str, user: dict = Depends(get_current_user)):
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_id,user_id") \
+            .eq("playlist_id", playlist_id) \
+            .maybe_single() \
+            .execute()
+    except Exception:
+        raise HTTPException(500, "DB error")
+    if not r or not r.data:
+        raise HTTPException(404, "Playlist not found")
+    if r.data.get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your playlist")
+    try:
+        get_supabase().table("brand_playlists").delete().eq("playlist_id", playlist_id).execute()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to delete: {e}")
+    _pc_del(playlist_id)
+    return {"ok": True}
+
+
+@protected_router.patch("/api/playlists/{playlist_id}/name")
+async def rename_individual_playlist(playlist_id: str, req: Request, user: dict = Depends(get_current_user)):
+    data = await req.json()
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_id,brand_id,playlist_json") \
+            .eq("playlist_id", playlist_id) \
+            .maybe_single() \
+            .execute()
+    except Exception as e:
+        raise HTTPException(500, "DB error")
+    if not r or not r.data:
+        raise HTTPException(404, "Playlist not found")
+    row = r.data
+    brand = _get_brand_db(row["brand_id"])
+    if not brand or brand.get("user_id") != user["id"]:
+        raise HTTPException(403, "Not your playlist")
+    try:
+        pj = row.get("playlist_json") or {}
+        if isinstance(pj, str):
+            try:
+                pj = json.loads(pj)
+            except Exception:
+                pj = {}
+        pj["playlist_name"] = name
+        get_supabase().table("brand_playlists") \
+            .update({"playlist_name": name, "playlist_json": pj}) \
+            .eq("playlist_id", playlist_id) \
+            .execute()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to rename: {e}")
+    return {"ok": True}
 
 
 @protected_router.post("/api/brands")
@@ -1174,6 +1556,23 @@ async def rename_playlist(brand_id: str, req: Request, user: dict = Depends(get_
     brand["playlist_name"] = name
     brand["last_updated"]  = datetime.now(timezone.utc).isoformat()
     save_brands({brand_id: brand})
+    # Also patch brand_playlists.playlist_json so _get_brands_db returns the new name
+    try:
+        r = get_supabase().table("brand_playlists") \
+            .select("playlist_json") \
+            .eq("brand_id", brand_id) \
+            .maybe_single() \
+            .execute()
+        if r and r.data:
+            raw = r.data["playlist_json"]
+            pj = (json.loads(raw) if isinstance(raw, str) else raw) or {}
+            pj["playlist_name"] = name
+            get_supabase().table("brand_playlists") \
+                .update({"playlist_json": pj, "updated_at": datetime.now(timezone.utc).isoformat()}) \
+                .eq("brand_id", brand_id) \
+                .execute()
+    except Exception as e:
+        logger.warning("rename_playlist brand_playlists patch failed for %s: %s", brand_id, e)
     return {"ok": True}
 
 
@@ -1361,11 +1760,21 @@ def catalog_genres():
     try:
         from backend.db import fetch_all_songs as _fetch
         songs = _fetch()
-        genres = sorted({
-            s.get("genre") for s in songs
-            if s.get("genre")
-            and not any(kw in (s.get("genre") or "").lower() for kw in _BANNED_GENRE_KEYWORDS)
-        })
+        from collections import defaultdict
+        raw: set[str] = {
+            s.get("genre").strip() for s in songs
+            if s.get("genre") and s.get("genre").strip()
+            and not any(kw in s.get("genre", "").lower() for kw in _BANNED_GENRE_KEYWORDS)
+        }
+        groups: dict[str, list[str]] = defaultdict(list)
+        for g in raw:
+            groups[g.lower()].append(g)
+        # Prefer title-cased variant; fall back to the first alphabetically
+        genres = []
+        for variants in groups.values():
+            best = next((v for v in variants if v == v.title()), sorted(variants)[0])
+            genres.append(best)
+        genres.sort(key=str.casefold)
         return {"genres": genres}
     except Exception as e:
         return {"genres": [], "error": str(e)}
@@ -1579,6 +1988,8 @@ async def update_dayparts(brand_id: str, req: Request, user: dict = Depends(get_
             for k in TARGET_KEYS:
                 if k in upd:
                     existing[i][k] = upd[k]
+            if "song_type_filter" in upd:
+                existing[i]["song_type_filter"] = upd["song_type_filter"] or None
             # Re-center the hard filter window around the user-set target.
             # Use ±0.20 for energy/valence and ±20 BPM for tempo so that extreme
             # targets (e.g. energy=1.0 or BPM=180) still match enough songs from
@@ -1640,6 +2051,8 @@ async def update_genres(brand_id: str, req: Request, user: dict = Depends(get_cu
     brand["exclude_genres"] = data.get("exclude_genres", [])
     if "song_type_filter" in data:
         brand["song_type_filter"] = data.get("song_type_filter") or None
+    if "labels" in data:
+        brand["labels"] = data.get("labels") or []
     brand["last_updated"] = datetime.now(timezone.utc).isoformat()
     save_brands({brand_id: brand})
     return {"ok": True}
@@ -1788,14 +2201,35 @@ async def replace_track(brand_id: str, req: Request, user: dict = Depends(get_cu
     return {"ok": True, "replacement": replacement, "day_part": dp}
 
 
-@protected_router.get("/api/playlists/{brand_id}")
-def get_playlist(brand_id: str):
-    pl = _get_playlist_db(brand_id)
+@protected_router.get("/api/playlists/by-id/{playlist_id}")
+def get_playlist_by_id(playlist_id: str):
+    cached = _pc_get(playlist_id)
+    if cached:
+        return cached
+    pl = _get_playlist_by_id_db(playlist_id)
     if not pl:
-        raise HTTPException(404, "No playlist found for this brand. Run generation first.")
+        raise HTTPException(404, "Playlist not found.")
+    _refresh_track_metadata(pl)
     for dp in pl.get("day_parts", []):
         for t in dp.get("tracks", []):
             t["src"] = _resolve_track_src(t)
+    _pc_set(playlist_id, pl)
+    return pl
+
+
+@protected_router.get("/api/playlists/{brand_id}")
+def get_playlist(brand_id: str):
+    cached = _pc_get(brand_id)
+    if cached:
+        return cached
+    pl = _get_playlist_db(brand_id)
+    if not pl:
+        raise HTTPException(404, "No playlist found for this brand. Run generation first.")
+    _refresh_track_metadata(pl)
+    for dp in pl.get("day_parts", []):
+        for t in dp.get("tracks", []):
+            t["src"] = _resolve_track_src(t)
+    _pc_set(brand_id, pl)
     return pl
 
 

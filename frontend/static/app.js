@@ -34,17 +34,18 @@ return {
   showRenameModal: false,
   renameValue: '',
   renamingBrandId: null,
+  renamingPlaylist: null,
+  renamingPlaylistValue: '',
+  openPlaylistMenu: null,
+  deletingPlaylist: null,
   genMode: '',
   genTask: null,
   genInterval: null,
   sbTask: null,
   sbInterval: null,
   sbCharts: {radar:null, timeline:null, radarLg:null},
-  sbGenreOverrides: {include:[], exclude:[]},
-  sbArtistOverrides: {include:[], exclude:[]},
-  sbSongTypeFilter: null,
-  sbLabels: [],
   sbShowAddGenre: false,
+  _sbFilterTimer: null,
   catalogArtists: [],
   catalogArtistsLoaded: false,
   hasUnsavedChanges: false,
@@ -53,7 +54,12 @@ return {
   sbTimelineDirty: false,
   sbProfileDirty: false,
   sbNeedsGeneration: false,
+  sbDataLoading: false,
   profileDirty: false,
+  brandPlaylistCache: {},
+  brandPlaylistCacheLoaded: {},
+  playlistDataCache: {},
+  hoveredBrand: null,
   sbVersion: 0,
   _sbSaveTimer: null,
   _dpSaveTimer: null,
@@ -108,12 +114,15 @@ return {
 
   _bannedGenres: ['christmas','wedding','bollywood','diwali','festival'],
   genreGroups: {
-    'Pop':       ['pop','afro pop','indie','indie pop'],
-    'Classical': ['classical','carnatic','indian classical','orchestral'],
-    'Jazz':      ['jazz','country','dance'],
-    'House':     ['deep house','tropical house'],
+    'Classical': ['classical'],
+    'EDM':       ['edm'],
+    'Hip Hop':   ['hip hop'],
+    'Indi Pop':  ['indi pop'],
+    'Jazz':      ['jazz'],
+    'Pop':       ['pop'],
+    'Rock':      ['rock'],
   },
-  allGenres: ['Blues','Classical','Country','Electronic','Hip Hop','Jazz','Latin','Other','Pop','Reggae','Rock','Soul/Funk'],
+  allGenres: [],
   catalogGenres: [], // loaded from DB — falls back to allGenres if empty
   catalogGenresLoaded: false,
 
@@ -140,9 +149,9 @@ return {
       this.currentUser = user;
       this.currentRole = user.role;
       this.brands = brands;
+      this._prefetchBrandPlaylists();
     } catch(e) { window.location.href = '/login'; return; }
 
-    this._prefetchPlaylists();
     this.player = new Audio();
     this._bindPlayer();
 
@@ -150,11 +159,8 @@ return {
     if (!this.page) {
       if (!this.brands.length) {
         this.page = 'brand-create';
-      } else if (this.brands.some(b => (b.playlist_count||0) > 0)) {
-        this.page = 'playlists-home';
       } else {
-        const active = this.brands.find(b => b.sound_board_result) || this.brands[0];
-        await this.openBrand(active.id);
+        this.page = 'playlists-home';
       }
     }
     this.loading = false;
@@ -165,16 +171,13 @@ return {
     this.$watch('page', async val => {
       if(val==='soundboard'){
         if(this.curBrand && !this.curBrand.sound_board_result){
+          this.sbDataLoading=true;
           await this.loadBrands();
           const b=this.brands.find(x=>x.id===this.curBrand.id);
           if(b)this.curBrand=b;
+          this.sbDataLoading=false;
         }
         this.scheduleSbChartsInit();
-      }
-      if(val==='playlists' && this.curBrand && !this.curPl && !this.plLoading){
-        this.plLoading=true;
-        try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
-        this.plLoading=false;
       }
     });
     this.$watch('curBrand', () => {
@@ -190,8 +193,7 @@ return {
   async loadActivity(){ try{ const r=await this.apiFetch('/api/activity'); if(r&&r.ok)this.activity=await r.json() }catch(e){} },
   async loadCatalogStats(){ try{ const r=await this.apiFetch('/api/catalog/stats'); if(r&&r.ok)this.catalogStats=await r.json() }catch(e){} },
   _fmtGenre(g){
-    const map={'hip_hop':'Hip Hop','soul_funk':'Soul/Funk','r_b':'R&B'};
-    return map[g]||g.split(/[_\s]+/).map(w=>w?w[0].toUpperCase()+w.slice(1):'').join(' ');
+    return g.split(/[_\s]+/).map(w=>w?w[0].toUpperCase()+w.slice(1):'').join(' ');
   },
   async loadCatalogGenres(){
     try{
@@ -226,6 +228,7 @@ return {
     }
     return raw;
   },
+  _fmtDur(s){const t=Math.round(s||0);return`${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;},
   _expandGenreList(displayNames){
     return[...new Set(displayNames.flatMap(n=>this.genreGroups[n]||[n]))];
   },
@@ -243,7 +246,7 @@ return {
   get filteredBrands(){
     if(!this.brandSearch) return this.brands;
     const q=this.brandSearch.toLowerCase();
-    return this.brands.filter(b=>(b.brand_name||'').toLowerCase().includes(q)||(b.category||'').toLowerCase().includes(q));
+    return this.brands.filter(b=>(b.playlist_name||b.brand_name||'').toLowerCase().includes(q)||(b.category||'').toLowerCase().includes(q));
   },
 
   get dpGenres(){
@@ -260,44 +263,120 @@ return {
     return indexed.filter(t=>t.genre===this.plGenreFilter);
   },
 
-  async openBrand(id){
-    const b=this.brands.find(x=>x.id===id);
+  _prefetchBrandPlaylists(){
+    // Single bulk request: loads metadata + full playlist data in one shot
+    this.apiFetch('/api/user/playlists').then(r=>r&&r.ok?r.json():null).then(d=>{
+      if(!d)return;
+      const byBrand=d.playlists_by_brand||{};
+      const newListCache={...this.brandPlaylistCache};
+      const newLoaded={...this.brandPlaylistCacheLoaded};
+      const newDataCache={...this.playlistDataCache};
+      Object.entries(byBrand).forEach(([bid,pls])=>{
+        // Strip playlist_data from the hover list entries, store it separately
+        newListCache[bid]=pls.map(({playlist_data,...meta})=>meta);
+        newLoaded[bid]=true;
+        pls.forEach(pl=>{if(pl.playlist_data)newDataCache[pl.playlist_id]=pl.playlist_data;});
+      });
+      (this.brands||[]).forEach(b=>{if(!newLoaded[b.id]){newListCache[b.id]=[];newLoaded[b.id]=true;}});
+      this.brandPlaylistCache=newListCache;
+      this.brandPlaylistCacheLoaded=newLoaded;
+      this.playlistDataCache=newDataCache;
+    }).catch(()=>{});
+  },
+
+  async hoverBrand(brandId){
+    this.hoveredBrand=brandId;
+    if(this.brandPlaylistCacheLoaded[brandId])return;
+    let pls=[];
+    try{
+      const r=await this.apiFetch('/api/brands/'+brandId+'/playlists');
+      const d=r&&r.ok?await r.json():null;
+      pls=(d&&d.playlists)||[];
+    }catch(e){}
+    this.brandPlaylistCache={...this.brandPlaylistCache,[brandId]:pls};
+    this.brandPlaylistCacheLoaded={...this.brandPlaylistCacheLoaded,[brandId]:true};
+    pls.forEach(pl=>{
+      if(!this.playlistDataCache[pl.playlist_id]){
+        this.apiFetch('/api/playlists/by-id/'+pl.playlist_id).then(r=>r&&r.ok?r.json():null).then(data=>{if(data)this.playlistDataCache={...this.playlistDataCache,[pl.playlist_id]:data};}).catch(()=>{});
+      }
+    });
+  },
+
+  async openPlaylistById(playlist_id){
+    if(!this.curBrand)return;
+    this.activeDp=0;
+    this.page='playlists';
+    this.curPl=null;
+    this.plLoading=true;
+    try{
+      const r=await this.apiFetch('/api/playlists/by-id/'+playlist_id);
+      if(r&&r.ok){this.curPl=await r.json();}
+      else{
+        const r2=await this.apiFetch('/api/playlists/'+this.curBrand.id);
+        if(r2&&r2.ok)this.curPl=await r2.json();
+      }
+    }catch(e){}
+    this.plLoading=false;
+  },
+
+  async openBrandAndPlaylist(brandId,playlistId){
+    const b=this.brands.find(x=>x.id===brandId);
     if(b)this.curBrand=b;
+    this.activeDp=0;
+    this.page='playlists';
+    if(this.playlistDataCache[playlistId]){
+      this.curPl=this.playlistDataCache[playlistId];
+      this.plLoading=false;
+      return;
+    }
+    this.curPl=null;
+    this.plLoading=true;
+    try{
+      const r=await this.apiFetch('/api/playlists/by-id/'+playlistId);
+      if(r&&r.ok){this.curPl=await r.json();this.playlistDataCache[playlistId]=this.curPl;}
+      else{
+        const r2=await this.apiFetch('/api/playlists/'+brandId);
+        if(r2&&r2.ok){this.curPl=await r2.json();}
+      }
+    }catch(e){}
+    this.plLoading=false;
+  },
+
+  _pruneStaleGenres(){
+    if(!this.curBrand||!this.catalogGenresLoaded)return;
+    const valid=new Set(this._expandGenreList(this.genres));
+    const inc=(this.curBrand.include_genres||[]).filter(g=>valid.has(g));
+    const exc=(this.curBrand.exclude_genres||[]).filter(g=>valid.has(g));
+    const changed=inc.length!==(this.curBrand.include_genres||[]).length||exc.length!==(this.curBrand.exclude_genres||[]).length;
+    if(changed){
+      this.curBrand={...this.curBrand,include_genres:inc,exclude_genres:exc};
+      this._saveFiltersToDb();
+    }
+  },
+  openBrandSoundboard(brandId){
+    const b=this.brands.find(x=>x.id===brandId);
+    if(!b)return;
+    this.curBrand=b;
+    this._pruneStaleGenres();
     this.curPl=null;
     this.activeDp=0;
-    const saved=localStorage.getItem('sbGenreOverrides_'+id);
-    this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
-    const savedArtists=localStorage.getItem('sbArtistOverrides_'+id);
-    this.sbArtistOverrides=savedArtists?JSON.parse(savedArtists):{include:[],exclude:[]};
-    this.sbSongTypeFilter=localStorage.getItem('sbSongTypeFilter_'+id)||null;
-    const savedLabels=localStorage.getItem('sbLabels_'+id);
-    this.sbLabels=savedLabels?JSON.parse(savedLabels):[];
-    this._origTargets={};
-    this._origRanges={};
+    this._origTargets={};this._origRanges={};
     this.hasUnsavedChanges=false;
-    this.sbAcousticDirty=false;
-    this.sbGenreDirty=false;
-    this.sbTimelineDirty=false;
-    this.sbProfileDirty=false;
-    this.profileDirty=false;
+    this.sbAcousticDirty=false;this.sbGenreDirty=false;
+    this.sbTimelineDirty=false;this.sbProfileDirty=false;this.profileDirty=false;
     this.page='soundboard';
     this.scheduleSbChartsInit();
-    // Load playlist in background — don't block soundboard render
-    this.apiFetch('/api/playlists/'+id).then(r=>{
-      if(r&&r.ok)r.json().then(d=>{
-        this.curPl=d;
-        this.scheduleSbChartsInit();
-      })
+    this.apiFetch('/api/playlists/'+brandId).then(r=>{
+      if(r&&r.ok)r.json().then(d=>{this.curPl=d;this.scheduleSbChartsInit();});
     }).catch(()=>{});
   },
 
   scheduleSbChartsInit(retries=60){
     this.$nextTick(()=>{
-      // Only keep retrying while the Soundboard view is active.
       if(this.page!=='soundboard') return;
       const rc=document.getElementById('sb-radar');
       const tc=document.getElementById('sb-timeline');
-      if(rc||tc){
+      if(rc&&tc){
         this.initSbCharts();
         return;
       }
@@ -307,23 +386,44 @@ return {
     });
   },
 
-  _saveGenreOverrides(){
-    if(this.curBrand?.id)
-      localStorage.setItem('sbGenreOverrides_'+this.curBrand.id, JSON.stringify(this.sbGenreOverrides));
-  },
-  _saveSbSongTypeFilter(){
-    if(this.curBrand?.id)
-      localStorage.setItem('sbSongTypeFilter_'+this.curBrand.id, this.sbSongTypeFilter||'');
-  },
   toggleSbLabel(code){
-    const idx=this.sbLabels.indexOf(code);
-    if(idx>=0)this.sbLabels.splice(idx,1);else this.sbLabels.push(code);
-    if(this.curBrand?.id)localStorage.setItem('sbLabels_'+this.curBrand.id,JSON.stringify(this.sbLabels));
+    if(!this.curBrand)return;
+    const active=(this.curBrand.labels||[]).includes(code);
+    this.curBrand.labels=active?[]:[code];
+    this.sbGenreDirty=true;
+    this._debouncedSaveFilters();
   },
   toggleSbSongType(type){
-    this.sbSongTypeFilter=this.sbSongTypeFilter===type?null:type;
-    this._saveSbSongTypeFilter();
-    this.sbGenreDirty=true;
+    if(!this.curBrand)return;
+    const cur=this.curBrand.song_type_filter;
+    let next;
+    if(cur===type){next=null;}
+    else if((type==='vocal'&&cur==='instrumental')||(type==='instrumental'&&cur==='vocal')){next='mixed';}
+    else if(cur==='mixed'){next=type==='vocal'?'instrumental':'vocal';}
+    else{next=type;}
+    this.curBrand.song_type_filter=next;
+    this.sbAcousticDirty=true;
+    this._debouncedSaveFilters();
+  },
+  _dpSongTypeVal(dp){const m={instrumental:0,mixed:1,vocal:2};return m[dp?.song_type_filter]??1;},
+  setSbDpSongType(val){
+    const dp=this.curBrand?.sound_board_result?.day_parts?.[this.activeDp];
+    if(!dp)return;
+    dp.song_type_filter=['instrumental','mixed','vocal'][+val];
+    this.sbAcousticDirty=true;
+  },
+  _debouncedSaveFilters(){
+    if(this._sbFilterTimer)clearTimeout(this._sbFilterTimer);
+    this._sbFilterTimer=setTimeout(()=>this._saveFiltersToDb(),600);
+  },
+  async _saveFiltersToDb(){
+    if(!this.curBrand?.id)return;
+    try{
+      await Promise.all([
+        this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:this.curBrand.include_genres||[],exclude_genres:this.curBrand.exclude_genres||[],song_type_filter:this.curBrand.song_type_filter||null,labels:this.curBrand.labels||[]})}),
+        this.apiFetch('/api/brands/'+this.curBrand.id+'/artists',{method:'PUT',body:JSON.stringify({include_artists:this.curBrand.include_artists||[],exclude_artists:this.curBrand.exclude_artists||[]})}),
+      ]);
+    }catch(e){console.warn('Failed to save filters:',e);}
   },
   async loadCatalogArtists(){
     if(this.catalogArtistsLoaded)return;
@@ -336,25 +436,22 @@ return {
       }
     }catch(e){}
   },
-  _saveArtistOverrides(){
-    if(this.curBrand?.id)
-      localStorage.setItem('sbArtistOverrides_'+this.curBrand.id, JSON.stringify(this.sbArtistOverrides));
-  },
-  sbArtistIncluded(a){
-    if(this.sbArtistOverrides.exclude.includes(a))return false;
-    if(this.sbArtistOverrides.include.includes(a))return true;
-    return(this.curBrand?.include_artists||[]).includes(a);
-  },
-  sbArtistExcluded(a){
-    if(this.sbArtistOverrides.include.includes(a))return false;
-    return(this.curBrand?.exclude_artists||[]).includes(a)||this.sbArtistOverrides.exclude.includes(a);
-  },
+  sbArtistIncluded(a){return(this.curBrand?.include_artists||[]).includes(a);},
+  sbArtistExcluded(a){return(this.curBrand?.exclude_artists||[]).includes(a);},
   toggleSbArtist(a){
+    if(!this.curBrand)return;
+    const inc=[...(this.curBrand.include_artists||[])];
+    const exc=[...(this.curBrand.exclude_artists||[])];
+    if(this.sbArtistExcluded(a)){
+      this.curBrand.exclude_artists=exc.filter(x=>x!==a);
+    } else if(this.sbArtistIncluded(a)){
+      this.curBrand.include_artists=inc.filter(x=>x!==a);
+      this.curBrand.exclude_artists=[...exc,a];
+    } else {
+      this.curBrand.include_artists=[...inc,a];
+    }
     this.sbGenreDirty=true;
-    const inc=this.sbArtistOverrides.include;const exc=this.sbArtistOverrides.exclude;
-    if(this.sbArtistExcluded(a)){this.sbArtistOverrides.exclude=exc.filter(x=>x!==a);this._saveArtistOverrides();return;}
-    if(this.sbArtistIncluded(a)){this.sbArtistOverrides.include=inc.filter(x=>x!==a);this.sbArtistOverrides.exclude=[...exc,a];this._saveArtistOverrides();return;}
-    this.sbArtistOverrides.include=[...inc,a];this._saveArtistOverrides();
+    this._debouncedSaveFilters();
   },
 
   // ── File upload ────────────────────────────
@@ -436,7 +533,21 @@ return {
   },
 
   toggleGenre(field,genre,target){const arr=target[field];const idx=arr.indexOf(genre);if(idx>=0)arr.splice(idx,1);else arr.push(genre)},
-  toggleLabel(code){const idx=this.form.labels.indexOf(code);if(idx>=0)this.form.labels.splice(idx,1);else this.form.labels.push(code)},
+  cycleGenre(genre,target){
+    const inc=target.include_genres, exc=target.exclude_genres;
+    const inIdx=inc.indexOf(genre), exIdx=exc.indexOf(genre);
+    if(inIdx>=0){inc.splice(inIdx,1);exc.push(genre);}       // include → exclude
+    else if(exIdx>=0){exc.splice(exIdx,1);}                   // exclude → neutral
+    else{inc.push(genre);}                                     // neutral → include
+  },
+  toggleFormSongType(type,target){
+    const cur=target.song_type_filter;
+    if(cur===type){target.song_type_filter=null;return;}
+    if((type==='vocal'&&cur==='instrumental')||(type==='instrumental'&&cur==='vocal')){target.song_type_filter='mixed';return;}
+    if(cur==='mixed'){target.song_type_filter=type==='vocal'?'instrumental':'vocal';return;}
+    target.song_type_filter=type;
+  },
+  toggleLabel(code){const active=this.form.labels.includes(code);this.form.labels=active?[]:[code];},
   toggleChip(arr,v){const i=arr.indexOf(v);if(i>=0)arr.splice(i,1);else arr.push(v)},
 
   async submitBrand(){
@@ -503,15 +614,17 @@ return {
             const finalStatus=this.genTask.status;
             clearInterval(this.sbInterval);this.sbInterval=null;
             if(finalStatus==='done') this.genTask.progress=100;
-            // Brief pause so user sees the done/error state before modal closes
+            // Brief pause so user sees 100% before closing
             await new Promise(res=>setTimeout(res,700));
-            this.showGen=false;
-            // Refresh data in background after modal closes
+            // Refresh brand data BEFORE closing spinner so page reveals with correct state
             await this.loadBrands();
-            if(this.genMode!=='soundboard')return;
+            if(this.genMode!=='soundboard'){this.showGen=false;this.genTask=null;return;}
             if(finalStatus==='done'){
               const b=this.brands.find(x=>x.id===brandId);
               if(b){this._origRanges={};this._origTargets={};this.curBrand=b;}
+            }
+            this.showGen=false;
+            if(finalStatus==='done'){
               this.scheduleSbChartsInit();
             } else {
               this.scheduleSbChartsInit();
@@ -544,41 +657,19 @@ return {
       const p=this.curBrand.brand_profile;
       profileReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/profile',{method:'PUT',body:JSON.stringify({sincerity:p.sincerity,excitement:p.excitement,competence:p.competence,sophistication:p.sophistication,ruggedness:p.ruggedness})});
     }
-    // Merge soundboard genre/artist overrides + song type filter into the brand's permanent settings
-    if(this.sbGenreOverrides.include.length||this.sbGenreOverrides.exclude.length||this.sbArtistOverrides.include.length||this.sbArtistOverrides.exclude.length||this.sbGenreDirty){
-      const baseInc=(this.curBrand?.include_genres||[]).map(g=>this._displayGenre(g));
-      const baseExc=(this.curBrand?.exclude_genres||[]).map(g=>this._displayGenre(g));
-      const excL=this.sbGenreOverrides.exclude.map(x=>x.toLowerCase());
-      const incL=this.sbGenreOverrides.include.map(x=>x.toLowerCase());
-      const mergedInc=[...new Set([...baseInc.filter(g=>!excL.includes(g.toLowerCase())),...this.sbGenreOverrides.include])];
-      const mergedExc=[...new Set([...baseExc.filter(g=>!incL.includes(g.toLowerCase())),...this.sbGenreOverrides.exclude])];
-      const newInc=this._expandGenreList(mergedInc);
-      const newExc=this._expandGenreList(mergedExc);
-      genreReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,song_type_filter:this.sbSongTypeFilter||null})});
-      const baseIncA=this.curBrand?.include_artists||[];
-      const baseExcA=this.curBrand?.exclude_artists||[];
-      const newIncA=[...new Set([...baseIncA.filter(a=>!this.sbArtistOverrides.exclude.includes(a)),...this.sbArtistOverrides.include])];
-      const newExcA=[...new Set([...baseExcA.filter(a=>!this.sbArtistOverrides.include.includes(a)),...this.sbArtistOverrides.exclude])];
-      const artistReq=()=>this.apiFetch('/api/brands/'+this.curBrand.id+'/artists',{method:'PUT',body:JSON.stringify({include_artists:newIncA,exclude_artists:newExcA})});
-      const _origGenreReq=genreReq;genreReq=async()=>{await _origGenreReq();await artistReq();};
-    }
     // Clear debounce timers and mark as saved immediately — saves run in background
     if(this._sbSaveTimer){clearTimeout(this._sbSaveTimer);this._sbSaveTimer=null;}
     if(this._dpSaveTimer){clearTimeout(this._dpSaveTimer);this._dpSaveTimer=null;}
     if(this._profileSaveTimer){clearTimeout(this._profileSaveTimer);this._profileSaveTimer=null;}
     try{
-      // Deterministic order prevents race-based value rollbacks.
       if(profileReq) await profileReq();
       if(soundboardReq) await soundboardReq();
       if(daypartsReq) await daypartsReq();
-      if(genreReq) await genreReq();
       await this.loadBrands();
       if(this.curBrand?.id){
         const latest=this.brands.find(x=>x.id===this.curBrand.id);
         if(latest)this.curBrand=latest;
       }
-      // Overrides are now merged into the brand — clear the transient state
-      if(genreReq){this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();this.sbArtistOverrides={include:[],exclude:[]};this._saveArtistOverrides();}
       this.hasUnsavedChanges=false;
       this.profileDirty=false;
       this.scheduleSbChartsInit();
@@ -589,18 +680,17 @@ return {
   },
 
   async generatePlaylist(id){
-    if(this.sbAcousticDirty||this.sbGenreDirty||this.sbTimelineDirty||this.sbProfileDirty){alert('Save your changes first before generating a playlist.');return;}
+    if(this.sbAcousticDirty||this.sbTimelineDirty||this.sbProfileDirty){alert('Save your changes first before generating a playlist.');return;}
     if(!id)return;
+    // Flush any pending genre/filter debounce before generating
+    if(this._sbFilterTimer){clearTimeout(this._sbFilterTimer);this._sbFilterTimer=null;}
+    if(this.sbGenreDirty){await this._saveFiltersToDb();this.sbGenreDirty=false;}
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
     this.sbNeedsGeneration=false;
-    // First generation — prompt for a playlist name first
-    if((this.curBrand?.playlist_count||0)===0){
-      this.pendingPlaylistName=this.curBrand?.brand_name||'';
-      this.showNamingModal=true;
-      return;
-    }
-    await this._startGenerate(id,null);
+    // Always prompt for a playlist name before generating
+    this.pendingPlaylistName='';
+    this.showNamingModal=true;
   },
 
   async _startGenerate(id,playlistName){
@@ -609,7 +699,7 @@ return {
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
     try{
-      const body={genre_overrides:{include:this._expandGenreList(this.sbGenreOverrides.include),exclude:this._expandGenreList(this.sbGenreOverrides.exclude)},artist_overrides:this.sbArtistOverrides,song_type_filter:this.sbSongTypeFilter||null,labels:this.sbLabels};
+      const body={};
       if(playlistName)body.playlist_name=playlistName;
       const r=await this.apiFetch('/api/generate/'+id,{method:'POST',body:JSON.stringify(body)});
       if(!r||!r.ok)throw new Error('Server returned '+(r?.status||'error'));
@@ -654,11 +744,6 @@ return {
 
   goToSoundboard(){
     if(!this.curBrand)return;
-    const saved=localStorage.getItem('sbGenreOverrides_'+this.curBrand.id);
-    this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
-    const savedArtists=localStorage.getItem('sbArtistOverrides_'+this.curBrand.id);
-    this.sbArtistOverrides=savedArtists?JSON.parse(savedArtists):{include:[],exclude:[]};
-    this.sbSongTypeFilter=localStorage.getItem('sbSongTypeFilter_'+this.curBrand.id)||null;
     this._origTargets={};this._origRanges={};
     this.hasUnsavedChanges=false;this.sbAcousticDirty=false;this.sbGenreDirty=false;
     this.sbTimelineDirty=false;this.sbProfileDirty=false;this.profileDirty=false;
@@ -670,6 +755,33 @@ return {
     this.renamingBrandId=id;
     this.renameValue=currentName;
     this.showRenameModal=true;
+  },
+
+  openPlaylistRenameModal(playlist_id,currentName){
+    this.renamingPlaylist={id:playlist_id,name:currentName};
+    this.renamingPlaylistValue=currentName;
+  },
+
+  async confirmPlaylistRename(){
+    if(!this.renamingPlaylistValue.trim()||!this.renamingPlaylist)return;
+    const newName=this.renamingPlaylistValue.trim();
+    try{
+      await this.apiFetch('/api/playlists/'+this.renamingPlaylist.id+'/name',{method:'PATCH',body:JSON.stringify({name:newName})});
+      const pl=this.brandPlaylists.find(x=>x.playlist_id===this.renamingPlaylist.id);
+      if(pl)pl.playlist_name=newName;
+    }catch(e){}
+    this.renamingPlaylist=null;
+    this.renamingPlaylistValue='';
+  },
+
+  async confirmDeletePlaylist(){
+    if(!this.deletingPlaylist)return;
+    const id=this.deletingPlaylist.id;
+    this.deletingPlaylist=null;
+    try{
+      await this.apiFetch('/api/playlists/'+id,{method:'DELETE'});
+      this.brandPlaylists=this.brandPlaylists.filter(x=>x.playlist_id!==id);
+    }catch(e){}
   },
 
   async confirmRename(){
@@ -684,41 +796,86 @@ return {
 
   _pollGen(taskId,brandId){
     if(this.genInterval)clearInterval(this.genInterval);
+    let _done=false;
     this.genInterval=setInterval(async()=>{
-      if(this.genMode!=='playlist')return;
+      if(_done||this.genMode!=='playlist')return;
       try{
         const r=await this.apiFetch('/api/generate/status/'+taskId);
-        if(this.genMode!=='playlist')return;
-        if(!r||r.status===404){clearInterval(this.genInterval);this.genInterval=null;this.showGen=false;this.genTask=null;return;}
+        if(_done||this.genMode!=='playlist')return;
+        if(!r||r.status===404){clearInterval(this.genInterval);this.genInterval=null;this.genTask={status:'error',progress:0,log:[],error:'Generation task not found — the server may have restarted. Please try again.'};return;}
         if(r.ok){
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
+            if(_done)return;
+            _done=true;
             const finalStatus=this.genTask.status;
             clearInterval(this.genInterval);this.genInterval=null;
-            if(finalStatus==='done'){
-              this.genTask.progress=100;
-              // Brief pause so user sees 100% done state before modal closes
-              await new Promise(res=>setTimeout(res,700));
-              if(this.genMode!=='playlist')return;
+            if(finalStatus==='error'){
+              // Modal stays open showing the error state; user closes via the Close button
+            } else if(finalStatus==='done'){
+              const newPlaylistId=this.genTask.playlist_id||'';
               this.showGen=false;
               this.genTask=null;
-              this.page='playlists';
-              this.scheduleSbChartsInit();
-              // Fetch playlists + sidebar data in background after modal closes
-              if(brandId){
-                this.plLoading=true;
-                this.apiFetch('/api/playlists/'+brandId).then(async pr=>{
-                  if(pr&&pr.ok){this.curPl=await pr.json();this.plCache[brandId]=this.curPl;}
-                  this.plLoading=false;
-                }).catch(()=>{this.plLoading=false;});
+              // Invalidate caches for this brand
+              this.brandPlaylistCacheLoaded={...this.brandPlaylistCacheLoaded,[brandId]:false};
+              delete this.playlistDataCache[newPlaylistId];
+              // Navigate immediately — only one API call (playlist data)
+              if(newPlaylistId){
+                await this.openBrandAndPlaylist(brandId,newPlaylistId);
+              }else{
+                this.page='playlists-home';
               }
-              Promise.all([this.loadBrands(),this.loadStats(),this.loadActivity()]);
+              // Refresh brands, stats and playlist list in background (non-blocking)
+              this.loadBrands().then(()=>{
+                this.apiFetch('/api/brands/'+brandId+'/playlists').then(pr=>{
+                  if(pr&&pr.ok)pr.json().then(pd=>{
+                    const pls=(pd&&pd.playlists)||[];
+                    this.brandPlaylistCache={...this.brandPlaylistCache,[brandId]:pls};
+                    this.brandPlaylistCacheLoaded={...this.brandPlaylistCacheLoaded,[brandId]:true};
+                  });
+                });
+              });
+              Promise.all([this.loadStats(),this.loadActivity()]);
             }
           }
         }
       }catch(e){}
     },500);
+  },
+
+  async confirmPlaylistRename(){
+    const pl=this.renamingPlaylist;
+    const name=this.renamingPlaylistValue.trim();
+    if(!pl||!name)return;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+pl.id+'/name',{method:'PATCH',body:JSON.stringify({name})});
+      if(r&&r.ok){
+        // Update cache in-place
+        const pls=this.brandPlaylistCache[pl.brandId]||[];
+        this.brandPlaylistCache={...this.brandPlaylistCache,[pl.brandId]:pls.map(p=>p.playlist_id===pl.id?{...p,playlist_name:name}:p)};
+        if(this.curPl?.playlist_id===pl.id)this.curPl={...this.curPl,playlist_name:name};
+      }
+    }catch(e){}
+    this.renamingPlaylist=null;this.renamingPlaylistValue='';
+  },
+
+  async confirmDeletePlaylist(){
+    const pl=this.deletingPlaylist;
+    if(!pl)return;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+pl.id,{method:'DELETE'});
+      if(r&&r.ok){
+        // Remove from cache
+        const pls=(this.brandPlaylistCache[pl.brandId]||[]).filter(p=>p.playlist_id!==pl.id);
+        this.brandPlaylistCache={...this.brandPlaylistCache,[pl.brandId]:pls};
+        delete this.playlistDataCache[pl.id];
+        // If currently viewing this playlist, go home
+        if(this.curPl?.playlist_id===pl.id){this.curPl=null;this.page='playlists-home';}
+        this.loadBrands();
+      }
+    }catch(e){}
+    this.deletingPlaylist=null;
   },
 
   async deleteBrand(id,name){
@@ -781,7 +938,6 @@ return {
       mk('tempo','Slow (60)','Fast (180)',t,dp0.tempo_min,dp0.tempo_max,dp0.tempo_target),
       mk('danceability','Free-form','Groovy',d,dp0.danceability_min,dp0.danceability_max,dp0.danceability_target),
       mk('acousticness','Electronic','Acoustic',a,dp0.acousticness_min,dp0.acousticness_max,dp0.acousticness_target),
-      mk('instrumentalness','Vocal','Instrumental',ins,dp0.instrumentalness_min,dp0.instrumentalness_max,dp0.instrumentalness_target),
       mk('loudness','Quiet','Loud',l,dp0.loudness_min,dp0.loudness_max,dp0.loudness_target),
       mk('speechiness','No Speech','Spoken Word',s,dp0.speechiness_min,dp0.speechiness_max,dp0.speechiness_target),
     ];
@@ -860,7 +1016,7 @@ return {
       if(Object.keys(targets).length)
         await this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})});
       if(dps?.length){
-        const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
+        const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target,song_type_filter:dp.song_type_filter||null}));
         await this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})});
       }
       this.sbAcousticDirty=false;
@@ -869,30 +1025,9 @@ return {
   },
 
   async saveGenreChanges(){
-    if(!this.curBrand?.id)return;
-    const baseInc=(this.curBrand?.include_genres||[]).map(g=>this._displayGenre(g));
-    const baseExc=(this.curBrand?.exclude_genres||[]).map(g=>this._displayGenre(g));
-    const excL=this.sbGenreOverrides.exclude.map(x=>x.toLowerCase());
-    const incL=this.sbGenreOverrides.include.map(x=>x.toLowerCase());
-    const mergedInc=[...new Set([...baseInc.filter(g=>!excL.includes(g.toLowerCase())),...this.sbGenreOverrides.include])];
-    const mergedExc=[...new Set([...baseExc.filter(g=>!incL.includes(g.toLowerCase())),...this.sbGenreOverrides.exclude])];
-    const newInc=this._expandGenreList(mergedInc);
-    const newExc=this._expandGenreList(mergedExc);
-    try{
-      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,song_type_filter:this.sbSongTypeFilter||null})});
-      const baseIncA=this.curBrand?.include_artists||[];
-      const baseExcA=this.curBrand?.exclude_artists||[];
-      const newIncA=[...new Set([...baseIncA.filter(a=>!this.sbArtistOverrides.exclude.includes(a)),...this.sbArtistOverrides.include])];
-      const newExcA=[...new Set([...baseExcA.filter(a=>!this.sbArtistOverrides.include.includes(a)),...this.sbArtistOverrides.exclude])];
-      await this.apiFetch('/api/brands/'+this.curBrand.id+'/artists',{method:'PUT',body:JSON.stringify({include_artists:newIncA,exclude_artists:newExcA})});
-      await this.loadBrands();
-      const latest=this.brands.find(x=>x.id===this.curBrand.id);
-      if(latest)this.curBrand=latest;
-      this.sbGenreOverrides={include:[],exclude:[]};this._saveGenreOverrides();
-      this.sbArtistOverrides={include:[],exclude:[]};this._saveArtistOverrides();
-      this.sbGenreDirty=false;
-      this.sbNeedsGeneration=true;
-    }catch(e){alert('Could not save genre changes. Please try again.');}
+    await this._saveFiltersToDb();
+    this.sbGenreDirty=false;
+    this.sbNeedsGeneration=true;
   },
 
   async saveTimelineChanges(){
@@ -964,33 +1099,30 @@ return {
 
   sbAllGenres(){return this.genres;},
   sbIncluded(g){
-    // g is a display name (e.g. 'Pop', 'Jazz') — overrides also store display names
     const gL=g.toLowerCase();
-    if(this.sbGenreOverrides.exclude.some(x=>x.toLowerCase()===gL))return false;
-    if(this.sbGenreOverrides.include.some(x=>x.toLowerCase()===gL))return true;
     return(this.curBrand?.include_genres||[]).some(x=>this._displayGenre(x).toLowerCase()===gL);
   },
   sbExcluded(g){
     const gL=g.toLowerCase();
-    if(this.sbGenreOverrides.include.some(x=>x.toLowerCase()===gL))return false;
-    return(this.curBrand?.exclude_genres||[]).some(x=>this._displayGenre(x).toLowerCase()===gL)||
-      this.sbGenreOverrides.exclude.some(x=>x.toLowerCase()===gL);
+    if(this.sbIncluded(g))return false;
+    return(this.curBrand?.exclude_genres||[]).some(x=>this._displayGenre(x).toLowerCase()===gL);
   },
   toggleSbGenre(g){
-    this.sbGenreDirty=true;
+    if(!this.curBrand)return;
     const gL=g.toLowerCase();
-    const inc=this.sbGenreOverrides.include;const exc=this.sbGenreOverrides.exclude;
-    // cycle: excluded → neutral, included → excluded, neutral → included
+    const expanded=this._expandGenreList([g]);
+    // cycle: excluded → neutral → included → excluded
     if(this.sbExcluded(g)){
-      this.sbGenreOverrides.exclude=exc.filter(x=>x.toLowerCase()!==gL);
-      this._saveGenreOverrides();return;
+      this.curBrand.exclude_genres=(this.curBrand.exclude_genres||[]).filter(x=>this._displayGenre(x).toLowerCase()!==gL);
+    } else if(this.sbIncluded(g)){
+      this.curBrand.include_genres=(this.curBrand.include_genres||[]).filter(x=>this._displayGenre(x).toLowerCase()!==gL);
+      this.curBrand.exclude_genres=[...(this.curBrand.exclude_genres||[]),...expanded.filter(e=>!(this.curBrand.exclude_genres||[]).includes(e))];
+    } else {
+      this.curBrand.include_genres=[...(this.curBrand.include_genres||[]),...expanded.filter(e=>!(this.curBrand.include_genres||[]).includes(e))];
+      this.curBrand.exclude_genres=(this.curBrand.exclude_genres||[]).filter(x=>this._displayGenre(x).toLowerCase()!==gL);
     }
-    if(this.sbIncluded(g)){
-      this.sbGenreOverrides.include=inc.filter(x=>x.toLowerCase()!==gL);
-      this.sbGenreOverrides.exclude=[...exc,g];
-      this._saveGenreOverrides();return;
-    }
-    this.sbGenreOverrides.include=[...inc,g];this._saveGenreOverrides();
+    this.sbGenreDirty=true;
+    this._debouncedSaveFilters();
   },
 
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
@@ -1214,12 +1346,7 @@ return {
             },
             dragData:{
               round:2,
-              showTooltip:true,
-              magnet:{to:v=>Math.round(v*100)/100},
-              onDragStart:(e,datasetIndex,index,value)=>{
-                // Change cursor to grabbing
-                tc.style.cursor='grabbing';
-              },
+              showTooltip:false,
               onDrag:(e,datasetIndex,index,value)=>{
                 tc.style.cursor='grabbing';
                 return round2(Math.min(1,Math.max(0,value)));
@@ -1230,7 +1357,7 @@ return {
                 if(datasetIndex===0) dpsRef[index].energy_target=clamped;
                 else dpsRef[index].valence_target=clamped;
                 this.sbTimelineDirty=true;
-                this.sbVersion++; // triggers sbAudioParams() to re-run for active dp
+                this.sbVersion++;
               }
             }
           },
@@ -1240,10 +1367,9 @@ return {
           }
         }
       });
-      // Avoid duplicate listeners on repeated chart inits.
-      tc.style.cursor='default';
-      tc.onmousemove=()=>{ if(tc.style.cursor!=='grabbing')tc.style.cursor='grab'; };
-      tc.onmouseleave=()=>{ tc.style.cursor='default'; };
+      tc.style.cursor='grab';
+      tc.onmousemove=null;
+      tc.onmouseleave=null;
     }
   },
 

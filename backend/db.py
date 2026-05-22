@@ -38,6 +38,13 @@ def get_supabase() -> Client:
     return _supabase
 
 
+def reset_supabase() -> Client:
+    """Force-recreate the Supabase client (e.g. after a connection drop) and return new instance."""
+    global _supabase
+    _supabase = None
+    return get_supabase()
+
+
 # ─── Startup checks ──────────────────────────────────────────────────────────
 
 def check_pgvector_enabled() -> bool:
@@ -71,16 +78,16 @@ def run_startup_checks(exit_on_fatal: bool = True) -> None:
     supabase = get_supabase()
 
     try:
-        songs_resp = supabase.table("songs").select("id", count="exact").execute()
+        songs_resp = supabase.table("analysis_song_features").select("song_id", count="exact").execute()
         song_count = songs_resp.count or 0
     except Exception as e:
-        print(f"[ERROR] Cannot query songs table: {e}")
+        print(f"[ERROR] Cannot query analysis_song_features table: {e}")
         if exit_on_fatal:
             sys.exit(1)
         return
 
     if song_count == 0:
-        print("[ERROR] songs table is empty. Cannot generate playlists.")
+        print("[ERROR] analysis_song_features table is empty. Cannot generate playlists.")
         if exit_on_fatal:
             sys.exit(1)
         return
@@ -91,7 +98,7 @@ def run_startup_checks(exit_on_fatal: bool = True) -> None:
 # ─── Data fetch helpers ───────────────────────────────────────────────────────
 
 _SONG_COLS = (
-    "id,title,artist,url,tempo_bpm,duration_seconds,"
+    "song_id,title,artist,url,bpm,duration_seconds,"
     "energy,danceability,loudness,acousticness,instrumentalness,"
     "speechness,genre,valence,song_type"
 )
@@ -100,6 +107,31 @@ _SONG_COLS = (
 # Normalize both to 0–1 so the pipeline's filters and MMR work correctly.
 _ENERGY_MAX  = 0.15
 _VALENCE_MAX = 9.0
+
+
+def _remap_songs(songs: list[dict]) -> list[dict]:
+    """Remap analysis_song_features column names to the field names the pipeline expects."""
+    remapped = []
+    for s in songs:
+        remapped.append({
+            "id":               s.get("song_id"),
+            "song_id":          s.get("song_id"),
+            "title":            s.get("title"),
+            "artist":           (s.get("artist") or "").lower(),
+            "url":              s.get("url"),
+            "tempo_bpm":        s.get("bpm"),
+            "duration_seconds": s.get("duration_seconds"),
+            "energy":           s.get("energy"),
+            "danceability":     s.get("danceability"),
+            "loudness":         s.get("loudness"),
+            "acousticness":     s.get("acousticness"),
+            "instrumentalness": s.get("instrumentalness"),
+            "speechness":       s.get("speechness") or 0.0,
+            "genre":            s.get("genre"),
+            "valence":          s.get("valence"),
+            "song_type":        s.get("song_type") or "",
+        })
+    return remapped
 
 
 def _normalize(songs: list[dict]) -> list[dict]:
@@ -136,7 +168,15 @@ def fetch_all_songs() -> list[dict]:
     global _song_cache, _song_cache_ts
     if _song_cache and (time.time() - _song_cache_ts) < _SONG_CACHE_TTL:
         return list(_song_cache)
-    rows = _normalize(_paginate(get_supabase().table("songs").select(_SONG_COLS)))
+    for attempt in range(2):
+        try:
+            rows = _normalize(_remap_songs(_paginate(get_supabase().table("analysis_song_features").select(_SONG_COLS))))
+            break
+        except Exception as e:
+            if attempt == 0 and any(kw in str(e).lower() for kw in ("disconnect", "connection")):
+                reset_supabase()
+                continue
+            raise
     rows = [
         s for s in rows
         if str(s.get("id")) not in _HIDDEN_IDS
@@ -155,7 +195,7 @@ def fetch_songs_filtered(
     """Fetch only songs matching the numeric bounds — avoids pulling the full 18k catalog."""
     q = (
         get_supabase()
-        .table("songs")
+        .table("analysis_song_features")
         .select(_SONG_COLS)
         .gte("tempo_bpm",  tempo_min)
         .lte("tempo_bpm",  tempo_max)
@@ -235,7 +275,7 @@ def search_by_embedding(
 def fetch_songs_by_artist(artist_name: str) -> list[dict]:
     result = (
         get_supabase()
-        .table("songs")
+        .table("analysis_song_features")
         .select(_SONG_COLS)
         .ilike("artist", f"%{artist_name}%")
         .execute()
@@ -248,7 +288,7 @@ def fetch_songs_by_genre(genre_name: str) -> list[dict]:
     query_str = genre_name.lower()
     result = (
         get_supabase()
-        .table("songs")
+        .table("analysis_song_features")
         .select(_SONG_COLS)
         .ilike("genre", f"%{query_str}%")
         .execute()

@@ -81,7 +81,7 @@ def _apply_hard_filters(
     exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit  = inputs.get("filter_explicit", True)
     song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
-    _LABEL_ARTISTS = {"AMU": "amurco", "FPO": "fabplay originals"}
+    _LABEL_ARTISTS = {"AMU": "amu", "FPO": "fpo"}
     label_filter = [_LABEL_ARTISTS[c.upper()] for c in (inputs.get("labels") or []) if c.upper() in _LABEL_ARTISTS]
 
     tempo_min  = day_part.get("tempo_min",  60)
@@ -132,14 +132,15 @@ def _apply_exclusion_filters_only(
     inputs:     dict,
 ) -> list[dict]:
     """
-    Fallback filter: only apply artist/genre exclusions and explicit proxy.
-    No energy/valence/tempo bounds — used when hard filters leave 0 candidates.
+    Apply hard filters: genre exclusions, genre inclusions (when specified),
+    artist exclusions, explicit proxy, song type, and label filters.
     """
     exclude_artists  = _normalise_list(inputs.get("exclude_artists", ""))
     exclude_genres   = _normalise_list(inputs.get("exclude_genres", ""))
+    include_genres   = _normalise_list(inputs.get("include_genres", ""))
     filter_explicit  = inputs.get("filter_explicit", True)
     song_type_filter = (inputs.get("song_type_filter") or "").strip().lower()
-    _LABEL_ARTISTS = {"AMU": "amurco", "FPO": "fabplay originals"}
+    _LABEL_ARTISTS = {"AMU": "amu", "FPO": "fpo"}
     label_filter = [_LABEL_ARTISTS[c.upper()] for c in (inputs.get("labels") or []) if c.upper() in _LABEL_ARTISTS]
 
     filtered = []
@@ -152,9 +153,12 @@ def _apply_exclusion_filters_only(
             continue
         if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
+        # Include genres: if any are specified, only allow tracks matching at least one
+        if include_genres and not any(_norm_genre(ig) in genre for ig in include_genres if ig):
+            continue
         if filter_explicit and _is_explicit_proxy(track):
             continue
-        if song_type_filter:
+        if song_type_filter and song_type_filter != 'mixed':
             track_type = (track.get("song_type") or "").strip().lower()
             if track_type and track_type != song_type_filter:
                 continue
