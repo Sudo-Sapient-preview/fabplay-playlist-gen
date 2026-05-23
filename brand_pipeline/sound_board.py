@@ -146,7 +146,7 @@ def get_sound_board(
         try:
             response = chat_client.chat.completions.create(
                 model=deployment,
-                max_completion_tokens=2000,
+                max_completion_tokens=1600,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},

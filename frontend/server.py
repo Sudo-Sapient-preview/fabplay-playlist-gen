@@ -42,18 +42,31 @@ async def serve_auth_callback():
     return FileResponse(str(STATIC_DIR / "auth-callback.html"))
 
 
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/dashboard")
 async def serve_dashboard(request: Request):
     # Server-side guard: redirect to /login if no session cookie present.
     # The real security is enforced by the API's JWT check on every request.
     if not request.cookies.get("fabplay_session"):
         return RedirectResponse("/login", status_code=302)
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return FileResponse(str(STATIC_DIR / "index.html"), headers=_NO_CACHE)
 
 
 @app.get("/dashboard/{path:path}")
 async def serve_dashboard_paths(path: str):
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return FileResponse(str(STATIC_DIR / "index.html"), headers=_NO_CACHE)
+
+
+@app.get("/static/app.js")
+async def serve_app_js():
+    return FileResponse(str(STATIC_DIR / "app.js"), media_type="application/javascript", headers=_NO_CACHE)
+
+
+@app.get("/static/style.css")
+async def serve_style_css():
+    return FileResponse(str(STATIC_DIR / "style.css"), media_type="text/css", headers=_NO_CACHE)
 
 
 # ── Proxy /api/* and /songs/* to backend ─────────────────────────────────────

@@ -112,6 +112,14 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 /* ── Brand cards ── */
 .brand-card{background:var(--card);border:1px solid var(--hairline);border-radius:12px;padding:18px 20px;cursor:pointer;transition:border-color 120ms ease,box-shadow 120ms ease;display:flex;flex-direction:column}
 .brand-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.05);border-color:var(--slate)}
+.playlist-menu-btn{position:absolute;top:8px;right:8px;padding:5px 7px;border:none;background:none;cursor:pointer;color:var(--muted);border-radius:6px;opacity:0;transition:opacity 120ms ease,background 120ms ease;line-height:0}
+.playlist-card:hover .playlist-menu-btn,.playlist-menu-btn.active{opacity:1}
+.playlist-menu-btn:hover,.playlist-menu-btn.active{background:var(--hairline);color:var(--text)}
+.playlist-menu-dropdown{position:absolute;top:34px;right:8px;background:var(--card);border:1px solid var(--bdr);border-radius:9px;box-shadow:0 4px 20px rgba(0,0,0,.13);min-width:148px;z-index:50;overflow:hidden}
+.playlist-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;font-size:13px;font-weight:500;font-family:inherit;background:none;border:none;cursor:pointer;color:var(--text);text-align:left;transition:background 100ms ease}
+.playlist-menu-item:hover{background:var(--hairline)}
+.playlist-menu-item.danger{color:#e53e3e}
+.playlist-menu-item.danger:hover{background:#fff5f5}
 .brand-emoji{width:44px;height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0}
 .brand-emoji-lg{width:52px;height:52px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex-shrink:0}
 
@@ -264,3 +272,52 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 
 /* ── Playlist fills viewport ── */
 #page-playlists .card.overflow-hidden{min-height:calc(100vh - 490px)}
+
+/* ══════════ Mobile / Responsive ══════════ */
+
+/* Horizontal-scroll wrapper for track tables */
+.table-scroll-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:767px){
+  .table-scroll-wrap .tr{min-width:580px}
+}
+
+/* Soundboard brand identity — 2-col on desktop, 1-col on mobile */
+.sb-identity-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+
+@media (max-width:767px){
+  /* Top bar — hide email */
+  .topbar-email{display:none}
+
+  /* Page header — tighten padding, allow wrap */
+  .page-header{padding:12px 16px;flex-wrap:wrap;gap:8px}
+  .page-title{font-size:1rem}
+  .page-header .btn{padding:7px 12px;font-size:.76rem}
+  .btn-back{padding:2px}
+
+  /* Soundboard identity — stack vertically */
+  .sb-identity-grid{grid-template-columns:1fr}
+
+  /* Now-playing bar — strip non-essential elements */
+  .np-bar{padding:0 12px;gap:8px}
+  .np-wave,.np-vol,.np-dot{display:none}
+
+  /* Cards */
+  .brand-card{padding:14px 16px}
+  .stat-n{font-size:1.5rem}
+
+  /* Step wizard labels */
+  .step-label{font-size:.6rem}
+
+  /* Review table label column */
+  .review-label{width:100px;min-width:100px}
+
+  /* Modals */
+  .modal-bg{padding:10px}
+  .modal-box{max-height:95vh}
+}
+
+/* Extra small — hide step labels completely */
+@media (max-width:480px){
+  .step-label{display:none}
+  .np-bar{gap:4px}
+}

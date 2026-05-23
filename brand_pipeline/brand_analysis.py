@@ -131,7 +131,7 @@ def get_brand_profile(
         try:
             response = chat_client.chat.completions.create(
                 model=deployment,
-                max_completion_tokens=2000,
+                max_completion_tokens=900,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
