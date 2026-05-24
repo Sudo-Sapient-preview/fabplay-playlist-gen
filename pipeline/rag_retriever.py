@@ -167,7 +167,7 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 # ─── Analysis features (clap_audio_512, mood, arousal) ───────────────────────
 
 def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
-    """Fetch maest_audio_768, clap_audio_512, mood_predicted_labels, arousal from analysis_song_features."""
+    """Fetch maest_audio_768 + clap_audio_512 from analysis_song_features; mood_predicted_labels + arousal from songs."""
     if not song_ids:
         return {}
     client = get_supabase()
@@ -177,7 +177,7 @@ def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
         batch = song_ids[i : i + batch_size]
         rows = (
             client.table("analysis_song_features")
-            .select("song_id,maest_audio_768,clap_audio_512,mood_predicted_labels,arousal")
+            .select("song_id,maest_audio_768,clap_audio_512")
             .in_("song_id", batch)
             .execute()
             .data or []
@@ -186,9 +186,21 @@ def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
             features[str(row["song_id"])] = {
                 "maest_audio_768":       row.get("maest_audio_768"),
                 "clap_audio_512":        row.get("clap_audio_512"),
-                "mood_predicted_labels": row.get("mood_predicted_labels"),
-                "arousal":               row.get("arousal"),
+                "mood_predicted_labels": None,
+                "arousal":               None,
             }
+        song_rows = (
+            client.table("songs")
+            .select("id,mood_predicted_labels,arousal")
+            .in_("id", batch)
+            .execute()
+            .data or []
+        )
+        for row in song_rows:
+            sid = str(row["id"])
+            entry = features.setdefault(sid, {"maest_audio_768": None, "clap_audio_512": None, "mood_predicted_labels": None, "arousal": None})
+            entry["mood_predicted_labels"] = row.get("mood_predicted_labels")
+            entry["arousal"] = row.get("arousal")
     return features
 
 
