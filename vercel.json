@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "fabplay/wsgi.py", "use": "@vercel/python", "config": { "maxLambdaSize": "50mb" } }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "fabplay/wsgi.py" }
+  ]
+}
