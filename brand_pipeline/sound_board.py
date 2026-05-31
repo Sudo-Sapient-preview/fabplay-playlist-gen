@@ -7,6 +7,7 @@ acousticness, instrumentalness, genre_emphasis, character_description).
 
 import json
 import logging
+import re
 import time
 
 from openai import AzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
@@ -141,56 +142,91 @@ def get_sound_board(
         Parsed Sound Board dict with 'sound_board' and 'day_parts' keys.
     """
     user_prompt = _build_user_prompt(brand_profile, category, music_notes)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_prompt},
+    ]
 
     for attempt in range(1, max_retries + 1):
-        try:
-            response = chat_client.chat.completions.create(
-                model=deployment,
-                max_completion_tokens=1600,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_prompt},
-                ],
-            )
-            raw = response.choices[0].message.content
-
+        # First attempt uses json_object mode; if content comes back empty, retry in plain text
+        use_json_mode = True
+        for pass_no in range(2):
             try:
-                sound_board = json.loads(raw)
-                _clamp_targets_to_ranges(sound_board)
-                _validate_sound_board(sound_board, category)
-                return sound_board
+                kwargs = dict(
+                    model=deployment,
+                    max_completion_tokens=1600,
+                    messages=messages,
+                )
+                if use_json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
 
-            except json.JSONDecodeError as e:
-                logger.error("Sound Board JSON parse error (attempt %d): %s", attempt, e)
-                _log_to_debug_file(raw, "sound_board_parse_error")
-                if attempt == max_retries:
-                    raise RuntimeError(
-                        "Failed to parse Sound Board JSON after "
-                        f"{max_retries} attempts. See azure_openai_debug.log."
-                    ) from e
-                continue
+                response = chat_client.chat.completions.create(**kwargs)
+                choice = response.choices[0]
+                raw = choice.message.content or ""
+                finish_reason = choice.finish_reason
 
-            except ValueError as e:
-                logger.error("Sound Board validation error (attempt %d): %s", attempt, e)
-                if attempt == max_retries:
-                    raise
-                continue
+                if not raw.strip():
+                    logger.warning(
+                        "Sound Board: empty content on attempt %d pass %d (finish_reason=%s) — %s",
+                        attempt, pass_no + 1, finish_reason,
+                        "retrying without response_format" if use_json_mode else "giving up this attempt",
+                    )
+                    _log_to_debug_file(
+                        f"finish_reason={finish_reason} usage={response.usage}",
+                        "sound_board_empty_response",
+                    )
+                    if use_json_mode:
+                        use_json_mode = False
+                        continue  # retry same attempt without json_object mode
+                    break  # both passes failed, fall through to next attempt
 
-        except RateLimitError:
-            wait = 10 * attempt
-            print(f"  [Rate limit] Waiting {wait}s before retry {attempt}/{max_retries}...")
-            time.sleep(wait)
+                try:
+                    sound_board = _extract_json(raw)
+                    _clamp_targets_to_ranges(sound_board)
+                    _validate_sound_board(sound_board, category)
+                    return sound_board
 
-        except AuthenticationError:
-            print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
-            raise
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error("Sound Board parse/validation error (attempt %d): %s", attempt, e)
+                    _log_to_debug_file(raw, "sound_board_parse_error")
+                    break  # try next attempt
 
-        except APIConnectionError:
-            print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
-            raise
+            except RateLimitError:
+                wait = 10 * attempt
+                print(f"  [Rate limit] Waiting {wait}s before retry {attempt}/{max_retries}...")
+                time.sleep(wait)
+                break
 
-    raise RuntimeError("Sound Board generation failed after all retries.")
+            except AuthenticationError:
+                print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
+                raise
+
+            except APIConnectionError:
+                print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
+                raise
+
+    raise RuntimeError(
+        f"Failed to generate Sound Board JSON after {max_retries} attempts. "
+        "Check azure_openai_debug.log for details."
+    )
+
+
+def _extract_json(raw: str) -> dict:
+    """Parse JSON from a model response, stripping markdown code fences if present."""
+    text = raw.strip()
+    # Strip ```json ... ``` or ``` ... ``` fences
+    fenced = re.sub(r'^```(?:json)?\s*\n?', '', text)
+    fenced = re.sub(r'\n?```\s*$', '', fenced).strip()
+    if fenced != text:
+        return json.loads(fenced)
+    # Try direct parse first; if it fails, find the first {...} block
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group(0))
+        raise
 
 
 def _clamp_targets_to_ranges(sound_board: dict) -> None:

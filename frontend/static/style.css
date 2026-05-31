@@ -273,6 +273,11 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 /* ── Playlist fills viewport ── */
 #page-playlists .card.overflow-hidden{min-height:calc(100vh - 490px)}
 
+/* ── iOS Safari: use dynamic viewport height so content isn't cut under address bar ── */
+@supports (height:100dvh){
+  #app-root{height:100dvh}
+}
+
 /* ══════════ Mobile / Responsive ══════════ */
 
 /* Horizontal-scroll wrapper for track tables */
@@ -284,9 +289,19 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 /* Soundboard brand identity — 2-col on desktop, 1-col on mobile */
 .sb-identity-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
 
+/* ── Soundboard action bar (Generate / View Playlists) ── */
+/* Desktop: flush right */
+.sb-action-bar{display:flex;justify-content:flex-end;gap:8px}
+
+/* ── Playlist home brand card: tap-expandable on mobile ── */
+/* Rename/delete row actions — hidden on desktop until row hover */
+.pl-row-actions{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity .15s}
+.group:hover .pl-row-actions{opacity:1}
+
 @media (max-width:767px){
-  /* Top bar — hide email */
+  /* Top bar — hide email, tighten padding */
   .topbar-email{display:none}
+  .topbar{padding:8px 16px!important}
 
   /* Page header — tighten padding, allow wrap */
   .page-header{padding:12px 16px;flex-wrap:wrap;gap:8px}
@@ -294,11 +309,32 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
   .page-header .btn{padding:7px 12px;font-size:.76rem}
   .btn-back{padding:2px}
 
+  /* ── Playlists page header: stretch action buttons full-width when wrapped ── */
+  #page-playlists .page-header>.flex.gap-2{width:100%}
+  #page-playlists .page-header>.flex.gap-2>.btn{
+    flex:1;justify-content:center;padding:8px 6px;font-size:.76rem
+  }
+
+  /* ── Playlists Home: brand cards are tap-expandable ── */
+  #page-playlists-home .brand-card{cursor:pointer}
+  /* Always show rename/delete actions (no hover on touch screens) */
+  .pl-row-actions{opacity:1}
+
   /* Soundboard identity — stack vertically */
   .sb-identity-grid{grid-template-columns:1fr}
 
-  /* Now-playing bar — strip non-essential elements */
-  .np-bar{padding:0 12px;gap:8px}
+  /* Soundboard section header rows — allow save button to wrap */
+  #page-soundboard .section-hdr{flex-wrap:wrap;gap:8px}
+  #page-soundboard .section-hdr .btn{font-size:.76rem;padding:6px 12px}
+
+  /* Now-playing bar — strip non-essential elements, add iOS safe area */
+  .np-bar{
+    padding:0 12px;
+    padding-bottom:max(0px,env(safe-area-inset-bottom));
+    gap:8px;
+    height:auto;
+    min-height:64px;
+  }
   .np-wave,.np-vol,.np-dot{display:none}
 
   /* Cards */
@@ -311,13 +347,50 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
   /* Review table label column */
   .review-label{width:100px;min-width:100px}
 
+  /* Upload zone — less tall on mobile */
+  .upload-zone{padding:24px 16px}
+
   /* Modals */
   .modal-bg{padding:10px}
   .modal-box{max-height:95vh}
+
+  /* Playlist track card min-height on mobile */
+  #page-playlists .card.overflow-hidden{min-height:200px}
+
+  /* ── Soundboard action bar: sticky at viewport bottom on mobile ── */
+  .sb-action-bar{
+    position:sticky;
+    bottom:0;
+    /* pull edge-to-edge past the parent's px-4 padding */
+    margin-left:-16px;
+    margin-right:-16px;
+    margin-bottom:-16px;
+    padding:12px 16px;
+    /* safe area for iPhone home indicator */
+    padding-bottom:max(12px,env(safe-area-inset-bottom));
+    background:rgba(242,238,229,0.97);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    border-top:1px solid var(--hairline);
+    justify-content:stretch;
+    gap:8px;
+    z-index:40;
+  }
+  .sb-action-bar .btn{
+    flex:1;
+    justify-content:center;
+  }
+
+  /* Add breathing room so the sticky bar doesn't overlap the last card */
+  #page-soundboard .sb-content-area{
+    padding-bottom:80px;
+  }
 }
 
-/* Extra small — hide step labels completely */
+/* Extra small — hide step labels completely, compact player */
 @media (max-width:480px){
   .step-label{display:none}
   .np-bar{gap:4px}
+  .np-ctrl button{padding:2px}
+  .np-scrub{gap:4px}
 }

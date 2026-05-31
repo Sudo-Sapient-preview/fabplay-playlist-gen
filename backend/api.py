@@ -145,6 +145,10 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8003").split(",
 app = FastAPI(title="fabPLAY API v3.0 MMR", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 # ─── Routers ──────────────────────────────────────────────────────────────────
 public_router     = APIRouter()
 protected_router  = APIRouter(dependencies=[Depends(get_current_user)])

@@ -8,6 +8,7 @@ aesthetics, customer profile, and genre recommendations.
 import json
 import logging
 import os
+import re
 import time
 
 from openai import AzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
@@ -126,52 +127,88 @@ def get_brand_profile(
         Parsed Brand Profile dict.
     """
     user_prompt = _build_user_prompt(inputs)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_prompt},
+    ]
 
     for attempt in range(1, max_retries + 1):
-        try:
-            response = chat_client.chat.completions.create(
-                model=deployment,
-                max_completion_tokens=900,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_prompt},
-                ],
-            )
-            raw = response.choices[0].message.content
-
+        use_json_mode = True
+        for pass_no in range(2):
             try:
-                profile = json.loads(raw)
-                # Inject brand_name if the model omitted it
-                if "brand_name" not in profile:
-                    profile["brand_name"] = inputs.get("brand_name", "")
-                return profile
+                kwargs = dict(
+                    model=deployment,
+                    max_completion_tokens=900,
+                    messages=messages,
+                )
+                if use_json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
 
-            except json.JSONDecodeError as e:
-                logger.error("Brand Profile JSON parse error (attempt %d): %s", attempt, e)
-                logger.debug("Raw response: %s", raw)
-                _log_to_debug_file(raw, "brand_profile_parse_error")
-                if attempt == max_retries:
-                    raise RuntimeError(
-                        "Failed to parse Brand Profile JSON after "
-                        f"{max_retries} attempts. See azure_openai_debug.log."
-                    ) from e
-                continue
+                response = chat_client.chat.completions.create(**kwargs)
+                choice = response.choices[0]
+                raw = choice.message.content or ""
+                finish_reason = choice.finish_reason
 
-        except RateLimitError:
-            wait = 10 * attempt
-            print(f"  [Rate limit] Waiting {wait}s before retry {attempt}/{max_retries}...")
-            time.sleep(wait)
+                if not raw.strip():
+                    logger.warning(
+                        "Brand Profile: empty content on attempt %d pass %d (finish_reason=%s) — %s",
+                        attempt, pass_no + 1, finish_reason,
+                        "retrying without response_format" if use_json_mode else "giving up this attempt",
+                    )
+                    _log_to_debug_file(
+                        f"finish_reason={finish_reason} usage={response.usage}",
+                        "brand_profile_empty_response",
+                    )
+                    if use_json_mode:
+                        use_json_mode = False
+                        continue
+                    break
 
-        except AuthenticationError:
-            print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
-            raise
+                try:
+                    profile = _extract_json(raw)
+                    if "brand_name" not in profile:
+                        profile["brand_name"] = inputs.get("brand_name", "")
+                    return profile
 
-        except APIConnectionError:
-            print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
-            raise
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error("Brand Profile parse error (attempt %d): %s", attempt, e)
+                    _log_to_debug_file(raw, "brand_profile_parse_error")
+                    break
 
-    raise RuntimeError("Brand Profile generation failed after all retries.")
+            except RateLimitError:
+                wait = 10 * attempt
+                print(f"  [Rate limit] Waiting {wait}s before retry {attempt}/{max_retries}...")
+                time.sleep(wait)
+                break
+
+            except AuthenticationError:
+                print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
+                raise
+
+            except APIConnectionError:
+                print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
+                raise
+
+    raise RuntimeError(
+        f"Failed to parse Brand Profile JSON after {max_retries} attempts. "
+        "Check azure_openai_debug.log for details."
+    )
+
+
+def _extract_json(raw: str) -> dict:
+    """Parse JSON from a model response, stripping markdown code fences if present."""
+    text = raw.strip()
+    fenced = re.sub(r'^```(?:json)?\s*\n?', '', text)
+    fenced = re.sub(r'\n?```\s*$', '', fenced).strip()
+    if fenced != text:
+        return json.loads(fenced)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group(0))
+        raise
 
 
 def _log_to_debug_file(content: str, tag: str) -> None:

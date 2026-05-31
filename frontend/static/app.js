@@ -820,11 +820,45 @@ return {
               // Invalidate caches for this brand
               this.brandPlaylistCacheLoaded={...this.brandPlaylistCacheLoaded,[brandId]:false};
               delete this.playlistDataCache[newPlaylistId];
-              // Navigate immediately — only one API call (playlist data)
+              // Navigate to playlist page immediately — set brand and page regardless of API outcome
+              const _navBrand=this.brands.find(x=>x.id===brandId);
+              if(_navBrand)this.curBrand=_navBrand;
+              this.activeDp=0;
+              this.page='playlists';
+              this.curPl=null;
+              this.plLoading=true;
+              // Fetch the new playlist (retry up to 3× with 800 ms gap for DB write propagation)
+              const _fetchNewPl=async(pid)=>{
+                for(let attempt=0;attempt<3;attempt++){
+                  if(attempt>0)await new Promise(res=>setTimeout(res,800));
+                  try{
+                    const r=await this.apiFetch('/api/playlists/by-id/'+pid);
+                    if(r&&r.ok){
+                      const d=await r.json();
+                      if(d&&(d.day_parts||[]).length){
+                        this.curPl=d;this.playlistDataCache[pid]=d;
+                        this.plLoading=false;return;
+                      }
+                    }
+                  }catch(e){}
+                }
+                this.plLoading=false;
+              };
               if(newPlaylistId){
-                await this.openBrandAndPlaylist(brandId,newPlaylistId);
+                await _fetchNewPl(newPlaylistId);
               }else{
-                this.page='playlists-home';
+                // playlist_id missing — poll brand playlists until newest appears (up to 3×)
+                let resolved=false;
+                for(let attempt=0;attempt<3&&!resolved;attempt++){
+                  if(attempt>0)await new Promise(res=>setTimeout(res,800));
+                  try{
+                    const pr=await this.apiFetch('/api/brands/'+brandId+'/playlists');
+                    const pls=(pr&&pr.ok)?((await pr.json()).playlists||[]):[];
+                    const pid=pls[0]?.playlist_id;
+                    if(pid){await _fetchNewPl(pid);resolved=true;}
+                  }catch(e){}
+                }
+                if(!resolved)this.plLoading=false;
               }
               // Refresh brands, stats and playlist list in background (non-blocking)
               this.loadBrands().then(()=>{

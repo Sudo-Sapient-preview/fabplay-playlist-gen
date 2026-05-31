@@ -1,7 +1,36 @@
 __pycache__/
 *.pyc
+*.pyo
+
+# Environment
 .env
+env/
+venv/
+.venv/
+
+# Data files
 data/brands_store.json
 data/playlists_store.json
 songs_manifest.json
 *.mp3
+*.csv
+
+# Logs
+*.log
+
+# One-time migration scripts
+migrate_*.py
+migration_*.sql
+simple_update.py
+
+# Branding drafts
+brandbeat-*.html
+brandbeat-audesy-main/
+
+# Deployment artifacts
+*_deploy.zip
+_deploy_*/
+
+# OS / editor
+.DS_Store
+Thumbs.db
