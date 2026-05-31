@@ -1,9 +1,12 @@
 import json
+import logging
 
 from django.views.decorators.http import require_GET, require_http_methods
 
+logger = logging.getLogger(__name__)
+
 from api.auth import require_auth
-from api.services.ai_service import analyze_files, quick_analyze
+from api.services.ai_service import analyze_files, quick_analyze, scrape_website, music_recs_from_content
 from api.services.generation_service import (
     get_generation_task,
     start_playlist_generation,
@@ -35,14 +38,38 @@ def quick_analyze_view(request):
         return err(error_message, 400)
 
     payload = payload or {}
+    website_url = payload.get("website_url", "").strip()
+    brand_description = payload.get("brand_description", "").strip()
+
     try:
+        website_content = scrape_website(website_url) if website_url else ""
+
         result = quick_analyze(
             payload.get("brand_name", ""),
             payload.get("category", ""),
-            payload.get("website_url", ""),
+            website_url,
+            website_content,
+            brand_description,
         )
+
+        # Generate music filters from whatever content is available.
+        # Priority: scraped website > brand description > nothing.
+        if website_content:
+            recs = music_recs_from_content(website_content)
+            result["asset_analysis"] = f"[Website: {website_url}]\n{website_content[:3000]}"
+        elif brand_description:
+            recs = music_recs_from_content(brand_description)
+            result["asset_analysis"] = f"[Brand Description]\n{brand_description[:3000]}"
+        else:
+            recs = {"recommended_genres": [], "avoid_genres": [], "music_notes": ""}
+            result["asset_analysis"] = ""
+
+        result["recommended_genres"] = recs.get("recommended_genres", [])
+        result["avoid_genres"] = recs.get("avoid_genres", [])
+        result["music_notes"] = recs.get("music_notes", "")
         return ok(result)
     except Exception as exc:
+        logger.exception("quick_analyze_view failed")
         return err(str(exc), 500)
 
 

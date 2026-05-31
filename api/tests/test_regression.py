@@ -22,15 +22,11 @@ class ApiRegressionTests(SimpleTestCase):
         (self.songs_dir / "demo.mp3").write_bytes(b"FAKEAUDIO")
 
         self._old_brands_file = store.BRANDS_FILE
-        self._old_playlists_file = store.PLAYLISTS_FILE
         store.BRANDS_FILE = self.tmp_path / "brands.json"
-        store.PLAYLISTS_FILE = self.tmp_path / "playlists.json"
         store.save_brands({})
-        store.save_playlists({})
 
     def tearDown(self):
         store.BRANDS_FILE = self._old_brands_file
-        store.PLAYLISTS_FILE = self._old_playlists_file
         self._tmpdir.cleanup()
         super().tearDown()
 
@@ -176,28 +172,24 @@ class ApiRegressionTests(SimpleTestCase):
                 }
             }
         )
-        store.save_playlists(
-            {
-                "brand-1": {
-                    "day_parts": [
+        playlist_data = {
+            "day_parts": [
+                {
+                    "name": "Morning",
+                    "tracks": [
                         {
-                            "name": "Morning",
-                            "tracks": [
-                                {
-                                    "song_id": "song-1",
-                                    "title": "Track 1",
-                                    "src": "songs/demo.mp3",
-                                    "url": "songs/demo.mp3",
-                                    "duration_seconds": 180,
-                                    "bfs": 0.7,
-                                    "mmr_score": 0.6,
-                                }
-                            ],
+                            "song_id": "song-1",
+                            "title": "Track 1",
+                            "src": "songs/demo.mp3",
+                            "url": "songs/demo.mp3",
+                            "duration_seconds": 180,
+                            "bfs": 0.7,
+                            "mmr_score": 0.6,
                         }
-                    ]
+                    ],
                 }
-            }
-        )
+            ]
+        }
 
         auth_patches = self._auth_patches(role="superadmin")
         mock_supabase = MagicMock()
@@ -231,6 +223,9 @@ class ApiRegressionTests(SimpleTestCase):
         ]
 
         with auth_patches[0], auth_patches[1], auth_patches[2], auth_patches[3], patch(
+            "api.services.playlist_service._fetch_playlist_from_supabase",
+            return_value=playlist_data,
+        ), patch(
             "api.views.playlist_views.remove_tracks",
             return_value=({"ok": True, "day_part": {"tracks": []}}, None, None),
         ), patch(

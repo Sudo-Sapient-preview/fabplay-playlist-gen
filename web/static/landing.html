@@ -1,225 +1,306 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fabplay — AI-Powered Music for Your Brand</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/landing.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brandbeat — Music, on brand.</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/500-italic.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
+<style>
+  :root {
+    --bone:               #F2EEE5;
+    --black:              #0A0A0A;
+    --penguin-red:        #B8451F;
+    --slate:              #5A5550;
+    --bone-tile:          #ECE7DC;
+    --hairline:           #C5BFB5;
+    --penguin-red-hover:  #9C3A1A;
+    --penguin-red-active: #82301A;
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-label:   'Inter Variable', 'Inter', system-ui, sans-serif;
+    --r-card:  12px;
+    --r-btn:   4px;
+    --r-large: 24px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; overflow-x: hidden; }
+  body { font-family: var(--font-label); background: var(--bone); color: var(--black); -webkit-font-smoothing: antialiased; overflow-x: hidden; width: 100%; }
+
+  .wm { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; text-decoration: none; }
+  .wm-b { color: var(--penguin-red); }
+  .wm-rest { color: var(--black); }
+
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 40px; width: 100%; }
+
+  /* ── nav ── */
+  .site-nav {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--bone);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0;
+  }
+
+  /* ── buttons ── */
+  .btn-primary {
+    display: inline-flex; align-items: center;
+    padding: 10px 20px;
+    background: var(--penguin-red); color: #fff;
+    font-family: var(--font-label); font-size: 13px; font-weight: 500;
+    border: none; border-radius: var(--r-btn);
+    cursor: pointer; text-decoration: none;
+    transition: background 120ms ease;
+  }
+  .btn-primary:hover { background: var(--penguin-red-hover); }
+  .btn-primary:active { background: var(--penguin-red-active); }
+
+  .btn-secondary {
+    display: inline-flex; align-items: center;
+    padding: 10px 20px;
+    background: transparent; color: var(--black);
+    font-family: var(--font-label); font-size: 13px; font-weight: 500;
+    border: 1px solid var(--hairline); border-radius: var(--r-btn);
+    cursor: pointer; text-decoration: none;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .btn-secondary:hover { background: var(--bone-tile); border-color: var(--slate); }
+
+  /* ── hero ── */
+  .hero { padding: 120px 0; border-bottom: 1px solid var(--hairline); }
+  .hero-inner { max-width: 760px; }
+
+  .eyebrow {
+    font-family: var(--font-label); font-size: 11px; font-weight: 500;
+    color: var(--slate); letter-spacing: 0.22em; text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+
+  .hero-headline {
+    font-family: var(--font-display); font-size: 60px; font-weight: 600;
+    line-height: 1.08; letter-spacing: -0.02em; color: var(--black);
+    margin-bottom: 28px;
+  }
+  .hero-headline em { font-style: italic; color: var(--penguin-red); }
+
+  .hero-subtitle {
+    font-family: var(--font-display); font-size: 19px; font-weight: 500;
+    color: var(--slate); line-height: 1.6; max-width: 580px;
+    margin-bottom: 40px;
+  }
+
+  .hero-ctas { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .hero-ctas .btn-primary, .hero-ctas .btn-secondary { white-space: nowrap; }
+
+  /* ── sections ── */
+  .section { padding: 96px 0; border-bottom: 1px solid var(--hairline); }
+
+  .section-eyebrow {
+    font-family: var(--font-label); font-size: 11px; font-weight: 500;
+    color: var(--slate); letter-spacing: 0.22em; text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .section-headline {
+    font-family: var(--font-display); font-size: 40px; font-weight: 600;
+    letter-spacing: -0.02em; line-height: 1.12; margin-bottom: 56px;
+  }
+  .section-headline em { font-style: italic; color: var(--penguin-red); }
+
+  /* ── steps ── */
+  .steps-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    border: 1px solid var(--hairline); border-radius: var(--r-card); overflow: hidden;
+  }
+  .step-card {
+    padding: 40px 32px; background: var(--bone);
+    border-right: 1px solid var(--hairline);
+  }
+  .step-card:last-child { border-right: none; }
+  .step-card:hover { background: var(--bone-tile); transition: background 120ms ease; }
+
+  .step-num {
+    font-family: var(--font-display); font-size: 48px; font-weight: 600;
+    color: var(--hairline); line-height: 1; margin-bottom: 20px;
+  }
+  .step-title {
+    font-family: var(--font-display); font-size: 22px; font-weight: 600;
+    color: var(--black); margin-bottom: 10px;
+  }
+  .step-desc {
+    font-family: var(--font-label); font-size: 13px;
+    color: var(--slate); line-height: 1.65;
+  }
+
+  /* ── use cases ── */
+  .cases-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+
+  .case-card {
+    padding: 32px; background: var(--bone);
+    border: 1px solid var(--hairline); border-radius: var(--r-card);
+    transition: background 120ms ease;
+  }
+  .case-card:hover { background: var(--bone-tile); }
+
+  .case-eyebrow {
+    font-family: var(--font-label); font-size: 11px; font-weight: 500;
+    color: var(--slate); letter-spacing: 0.18em; text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .case-title {
+    font-family: var(--font-display); font-size: 24px; font-weight: 600;
+    color: var(--black); margin-bottom: 10px;
+  }
+  .case-desc {
+    font-family: var(--font-label); font-size: 13px;
+    color: var(--slate); line-height: 1.65;
+  }
+
+  /* ── cta ── */
+  .cta-section {
+    padding: 96px 0; border-bottom: 1px solid var(--hairline);
+    text-align: center;
+  }
+  .cta-headline {
+    font-family: var(--font-display); font-size: 52px; font-weight: 600;
+    letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 36px;
+  }
+
+  /* ── footer ── */
+  .site-footer { padding: 32px 0; }
+  .footer-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px; flex-wrap: wrap;
+  }
+  .footer-principle {
+    font-family: var(--font-display); font-size: 14px; font-style: italic;
+    color: var(--slate);
+  }
+  .footer-meta {
+    font-family: var(--font-label); font-size: 12px; font-weight: 500;
+    color: var(--hairline); letter-spacing: 0.04em;
+  }
+
+  /* ── responsive ── */
+  @media (max-width: 768px) {
+    .container { padding: 0 20px; }
+    .hero { padding: 64px 0; }
+    .hero-headline { font-size: 36px; }
+    .hero-subtitle { font-size: 16px; }
+    .section { padding: 56px 0; }
+    .section-headline { font-size: 28px; margin-bottom: 32px; }
+    .steps-grid { grid-template-columns: 1fr; }
+    .step-card { border-right: none; border-bottom: 1px solid var(--hairline); }
+    .step-card:last-child { border-bottom: none; }
+    .cases-grid { grid-template-columns: 1fr; }
+    .cta-section { padding: 56px 0; }
+    .cta-headline { font-size: 30px; }
+    .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
+    .hero-ctas { flex-direction: column; align-items: flex-start; }
+    .hero-ctas .btn-primary, .hero-ctas .btn-secondary { width: 100%; justify-content: center; }
+  }
+
+  @media (max-width: 480px) {
+    .hero-headline { font-size: 28px; }
+    .cta-headline { font-size: 26px; }
+    .container { padding: 0 16px; }
+  }
+</style>
 </head>
-<body class="landing">
-  <header class="site-header">
-    <div class="container nav">
-      <img src="/static/logo.jpg" alt="Fabplay" style="height:42px;">
-      <nav class="nav-links">
-        <a href="#how">How It Works</a>
-        <a href="#why">Why Fabplay</a>
-        <a href="#faq">FAQ</a>
-        <a class="btn btn-primary" href="/login">Get it now</a>
-      </nav>
-    </div>
-  </header>
+<body>
 
-  <section class="hero">
-    <div class="container hero-content">
-      <div>
-        <div class="hero-pill">AI-curated. Royalty-free. Always on-brand.</div>
-        <h1 class="hero-title reveal" style="animation-delay:0.1s;">Your Brand Has a Sound. Let’s Find It.</h1>
-        <p class="hero-subtitle reveal" style="animation-delay:0.2s;">Turn your identity into playlists your customers remember — tuned by AI, approved by you.</p>
-        <div class="hero-actions reveal" style="animation-delay:0.3s;">
-          <a class="btn btn-primary" href="/login">Get Your Brand’s Sound</a>
-          <a class="btn btn-ghost" href="#how">See How It Works</a>
-        </div>
-        <div class="hero-note reveal" style="animation-delay:0.4s;">Free trial. No credit card.</div>
-        <div class="hero-metrics">
-          <div>
-            <strong>500+</strong>
-            <span>Live stores</span>
-          </div>
-          <div>
-            <strong>20K+</strong>
-            <span>Licensed tracks</span>
-          </div>
-          <div>
-            <strong>1K+</strong>
-            <span>Playlists</span>
-          </div>
-        </div>
+<nav class="site-nav">
+  <div class="container nav-inner">
+    <a href="/" class="wm" aria-label="brandbeat">
+      <span class="wm-b">b</span><span class="wm-rest">randbeat</span>
+    </a>
+    <a href="/login" class="btn-secondary">Sign in</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container">
+    <div class="hero-inner">
+      <p class="eyebrow">Music, on brand · By Audesy</p>
+      <h1 class="hero-headline">A playlist that sounds <em>like your brand.</em></h1>
+      <p class="hero-subtitle">Brandbeat reads your logo, your voice, your customers, your moment — and assembles a royalty-free playlist your store can play today.</p>
+      <div class="hero-ctas">
+        <a href="/login" class="btn-primary">Start a Playlist</a>
+        <a href="#how" class="btn-secondary">How it works</a>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="section light" id="how">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Generic playlists kill your brand vibe.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Your store’s music is the first thing customers feel. Off-brand music costs attention and sales — on-brand music boosts spending by up to <span style="color:var(--accent);font-weight:700;">40%</span>.</p>
-
-      <h3 class="section-title reveal" style="margin-top:60px;animation-delay:0.15s;">Three steps. Minutes, not days.</h3>
-      <div class="steps">
-        <div class="step-card">
-          <div class="step-icon">⬆️</div>
-          <div class="step-label">Step 1</div>
-          <div class="step-title">Share your brand</div>
-          <p>Tell us your vibe, customers, and location. Upload your assets.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-icon">✨</div>
-          <div class="step-label">Step 2</div>
-          <div class="step-title">AI builds your sound</div>
-          <p>We analyze your identity and design an on-brand music profile.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-icon">▶️</div>
-          <div class="step-label">Step 3</div>
-          <div class="step-title">Play on-brand, all day</div>
-          <p>Approve, tweak, and schedule playlists across locations.</p>
-        </div>
+<section class="section" id="how">
+  <div class="container">
+    <p class="section-eyebrow">Process</p>
+    <h2 class="section-headline">Three steps to your sound.</h2>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <div class="step-title">Brief your brand.</div>
+        <p class="step-desc">Upload your logo, describe your voice, set your audience. Brandbeat learns what makes your space distinctive.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <div class="step-title">The engine curates.</div>
+        <p class="step-desc">Our AI maps brand personality to music targets for each time of day — morning energy, afternoon pace, evening atmosphere.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <div class="step-title">Your playlist plays.</div>
+        <p class="step-desc">Download, stream, or export for your in-store system. Every track royalty-free, every choice deliberate.</p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="section soft" id="why">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Built for busy brand owners.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Everything you need to turn brand identity into a signature soundtrack.</p>
-      <div class="cards">
-        <div class="info-card">
-          <div class="icon-box">🧠</div>
-          <div>
-            <h4>Always on-brand</h4>
-            <p>AI-curated to your brand personality — not someone's Spotify taste.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🎵</div>
-          <div>
-            <h4>Royalty-free</h4>
-            <p>20,000+ licensed tracks. Zero copyright headaches.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">⚡</div>
-          <div>
-            <h4>Ready in minutes</h4>
-            <p>Upload, generate, play. No music expertise needed.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🎛️</div>
-          <div>
-            <h4>You're in control</h4>
-            <p>Review, adjust, approve. Nothing plays without your say.</p>
-          </div>
-        </div>
+<section class="section">
+  <div class="container">
+    <p class="section-eyebrow">Use cases</p>
+    <h2 class="section-headline">Every space has its <em>moment.</em></h2>
+    <div class="cases-grid">
+      <div class="case-card">
+        <p class="case-eyebrow">Retail · Flagship store</p>
+        <h3 class="case-title">Saturday rush, fitting-room calm.</h3>
+        <p class="case-desc">High energy at the entrance when footfall peaks. Slower, more contemplative selections as customers move toward the fitting rooms.</p>
+      </div>
+      <div class="case-card">
+        <p class="case-eyebrow">Hospitality · Hotel lobby</p>
+        <h3 class="case-title">Morning calm, afternoon lift, evening quiet.</h3>
+        <p class="case-desc">Three distinct day-part playlists curated from a single brand brief. Guests feel the progression without noticing the change.</p>
+      </div>
+      <div class="case-card">
+        <p class="case-eyebrow">Food &amp; beverage · Café</p>
+        <h3 class="case-title">Espresso bar in the AM, wine-bar energy by 6 PM.</h3>
+        <p class="case-desc">A working café needs two completely different personalities in one day. Brandbeat handles the handoff automatically.</p>
+      </div>
+      <div class="case-card">
+        <p class="case-eyebrow">Events · Private dining</p>
+        <h3 class="case-title">Ceremony, reception, dinner — one brief.</h3>
+        <p class="case-desc">Three moods, sequenced and timed. Brief Brandbeat once and let the evening unfold on its own terms.</p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="section light">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Brands that sound like themselves.</h2>
-      <div class="brand-strip">
-        <div>Retail</div>
-        <div>Hospitality</div>
-        <div>Wellness</div>
-        <div>Food + Café</div>
-      </div>
-      <div class="metrics">
-        <div class="metric">
-          <h3>500+</h3>
-          <p>Stores using Fabplay</p>
-        </div>
-        <div class="metric">
-          <h3>20K+</h3>
-          <p>Licensed tracks</p>
-        </div>
-        <div class="metric">
-          <h3>1K+</h3>
-          <p>Playlists generated</p>
-        </div>
-      </div>
-      <div class="testimonials">
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"Fabplay completely changed how our stores feel. Customers comment on the music all the time now."</p>
-          <strong>Priya Sharma</strong>
-          <div style="color:var(--muted);font-size:13px;">Brand Manager, Luxe Boutique</div>
-        </div>
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"We went from random playlists to a perfectly curated sound in under 10 minutes. Game changer."</p>
-          <strong>Arjun Mehta</strong>
-          <div style="color:var(--muted);font-size:13px;">Operations Head, Brew &amp; Bean Cafés</div>
-        </div>
-        <div class="testimonial">
-          <div class="stars">★★★★★</div>
-          <p>"The AI nailed our brand vibe on the first try. Our lobby music finally matches our identity."</p>
-          <strong>Sneha Kapoor</strong>
-          <div style="color:var(--muted);font-size:13px;">Marketing Director, The Grand Hotels</div>
-        </div>
-      </div>
-    </div>
-  </section>
+<section class="cta-section">
+  <div class="container">
+    <h2 class="cta-headline">Ready to find your sound.</h2>
+    <a href="/login" class="btn-primary" style="font-size:14px;padding:14px 28px;white-space:nowrap;">Start a Playlist</a>
+  </div>
+</section>
 
-  <section class="section soft" id="faq">
-    <div class="container">
-      <h2 class="section-title reveal" style="animation-delay:0.05s;">Questions, answered.</h2>
-      <p class="section-sub reveal" style="animation-delay:0.1s;">Everything you need to get started fast.</p>
-      <div class="cards">
-        <div class="info-card">
-          <div class="icon-box">💳</div>
-          <div>
-            <h4>Is there a free trial?</h4>
-            <p>Yes. Start free and cancel anytime. No credit card required.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">📍</div>
-          <div>
-            <h4>Can I manage multiple locations?</h4>
-            <p>Absolutely. Create playlists and schedules per store or region.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🛡️</div>
-          <div>
-            <h4>Is the music licensed?</h4>
-            <p>Yes. Fabplay uses fully licensed, royalty-free catalogs.</p>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="icon-box">🔧</div>
-          <div>
-            <h4>Can I tweak the playlists?</h4>
-            <p>Review, adjust, and approve before anything goes live.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <span class="footer-principle">Generous whitespace, a single accent, two typefaces, four colors.</span>
+    <span class="footer-meta">Brandbeat · By Audesy · MMXXVI</span>
+  </div>
+</footer>
 
-  <section class="cta">
-    <div class="container">
-      <h2 class="section-title">Ready to hear your brand?</h2>
-      <a class="btn btn-primary" href="/login">Get Your Brand's Sound</a>
-      <div class="hero-note" style="color:var(--muted);">Free. No credit card. No commitment.</div>
-    </div>
-  </section>
-
-  <footer class="footer">
-    <div class="container footer-grid">
-      <img src="/static/logo.jpg" alt="Fabplay" style="height:36px;">
-      <div class="footer-links">
-        <a href="/login">About</a>
-        <a href="/login">Contact</a>
-        <a href="/login">Privacy</a>
-        <a href="/login">Terms</a>
-      </div>
-      <div style="font-size:12px;">Part of the HT Media family</div>
-    </div>
-    <div class="footer-note">© 2026 Fabplay. All rights reserved.</div>
-  </footer>
 </body>
 </html>

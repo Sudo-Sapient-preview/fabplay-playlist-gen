@@ -6,7 +6,6 @@ from typing import Any
 
 DATA_DIR = Path("data")
 BRANDS_FILE = DATA_DIR / "brands_store.json"
-PLAYLISTS_FILE = DATA_DIR / "playlists_store.json"
 
 _store_lock = threading.RLock()
 
@@ -36,14 +35,6 @@ def get_brands() -> dict:
 
 def save_brands(brands: dict) -> None:
     save_json(BRANDS_FILE, brands)
-
-
-def get_playlists() -> dict:
-    return load_json(PLAYLISTS_FILE, {})
-
-
-def save_playlists(playlists: dict) -> None:
-    save_json(PLAYLISTS_FILE, playlists)
 
 
 def get_brand(brand_id: str) -> dict | None:

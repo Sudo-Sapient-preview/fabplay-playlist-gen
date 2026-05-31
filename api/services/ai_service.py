@@ -1,12 +1,30 @@
 import base64
 import json
+import logging
 import os
+import time
 from typing import Iterable
 
 import fitz
-from openai import AzureOpenAI
+import requests
+from openai import AzureOpenAI, RateLimitError
 
 from api.db import fetch_all_songs
+
+logger = logging.getLogger(__name__)
+
+
+def _chat_with_retry(client, **kwargs):
+    for attempt in range(4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError:
+            if attempt == 3:
+                raise
+            wait = 2 ** attempt * 3
+            logger.warning("Rate limited, retrying in %ss (attempt %d/4)", wait, attempt + 1)
+            time.sleep(wait)
+    raise RuntimeError("Unreachable")
 
 
 QUICK_ANALYZE_PROMPT = """\
@@ -62,25 +80,68 @@ def chat_client() -> tuple[AzureOpenAI, str]:
     ), deployment
 
 
-def quick_analyze(brand_name: str, category: str, website_url: str = "") -> dict:
+def scrape_website(url: str, max_chars: int = 8000) -> str:
+    api_key = os.getenv("FIRECRAWL_API_KEY", "")
+    if not api_key or not url:
+        return ""
+    try:
+        resp = requests.post(
+            "https://api.firecrawl.dev/v1/scrape",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"url": url, "formats": ["markdown"]},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = (data.get("data") or {}).get("markdown") or ""
+        return content[:max_chars].strip()
+    except Exception as exc:
+        logger.warning("Firecrawl scrape failed for %s: %s", url, exc)
+        return ""
+
+
+def quick_analyze(brand_name: str, category: str, website_url: str = "", website_content: str = "", brand_description: str = "") -> dict:
     client, deployment = chat_client()
-    response = client.chat.completions.create(
+    user_parts = [
+        f"Brand: {brand_name}",
+        f"Category: {category or 'not provided'}",
+        f"Website: {website_url or 'not provided'}",
+    ]
+    if brand_description:
+        user_parts.append(f"Brand Description: {brand_description}")
+    if website_content:
+        user_parts.append(f"\nWebsite content (scraped):\n{website_content}")
+    response = _chat_with_retry(client, 
         model=deployment,
         max_completion_tokens=600,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": QUICK_ANALYZE_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"Brand: {brand_name}\n"
-                    f"Category: {category or 'not provided'}\n"
-                    f"Website: {website_url or 'not provided'}"
-                ),
-            },
+            {"role": "user", "content": "\n".join(user_parts)},
         ],
     )
     return json.loads(response.choices[0].message.content)
+
+
+def music_recs_from_content(content: str) -> dict:
+    """Run music genre recommendations against arbitrary text (e.g. scraped website)."""
+    if not content:
+        return {"recommended_genres": [], "avoid_genres": [], "music_notes": ""}
+    client, deployment = chat_client()
+    try:
+        response = _chat_with_retry(client, 
+            model=deployment,
+            max_completion_tokens=300,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _music_recommendations_prompt()},
+                {"role": "user", "content": content},
+            ],
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as exc:
+        logger.warning("music_recs_from_content failed: %s", exc)
+        return {"recommended_genres": [], "avoid_genres": [], "music_notes": ""}
 
 
 def _music_recommendations_prompt() -> str:
@@ -107,12 +168,12 @@ def _analyze_pdf(client: AzureOpenAI, deployment: str, filename: str, content: b
         text = "\n".join(page.get_text() for page in doc)
     finally:
         doc.close()
-    response = client.chat.completions.create(
+    response = _chat_with_retry(client, 
         model=deployment,
         max_completion_tokens=600,
         messages=[
             {"role": "system", "content": _ASSET_TEXT_PROMPT},
-            {"role": "user", "content": f"File: {filename}\n\n{text[:8000]}"},
+            {"role": "user", "content": f"File: {filename}\n\n{text[:30000]}"},
         ],
     )
     return response.choices[0].message.content
@@ -130,7 +191,7 @@ def _analyze_image(client: AzureOpenAI, deployment: str, filename: str, content:
         else "image/gif"
     )
     b64 = base64.b64encode(content).decode()
-    response = client.chat.completions.create(
+    response = _chat_with_retry(client, 
         model=deployment,
         max_completion_tokens=400,
         messages=[
@@ -172,7 +233,7 @@ def analyze_files(files: Iterable[tuple[str, bytes]]) -> dict:
 
     if asset_analysis:
         try:
-            response = client.chat.completions.create(
+            response = _chat_with_retry(client, 
                 model=deployment,
                 max_completion_tokens=300,
                 response_format={"type": "json_object"},
@@ -198,3 +259,4 @@ def analyze_files(files: Iterable[tuple[str, bytes]]) -> dict:
         "music_notes": music_recs.get("music_notes", ""),
         "has_brand_guidelines": has_guidelines,
     }
+

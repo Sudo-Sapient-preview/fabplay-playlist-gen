@@ -1,5 +1,3 @@
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, override_settings
@@ -11,18 +9,16 @@ from api.services import playlist_service
 class PlaylistServiceTests(SimpleTestCase):
     def setUp(self):
         super().setUp()
+        import tempfile
+        from pathlib import Path
         self._tmpdir = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self._tmpdir.name)
         self._old_brands_file = store.BRANDS_FILE
-        self._old_playlists_file = store.PLAYLISTS_FILE
         store.BRANDS_FILE = self.tmp_path / "brands.json"
-        store.PLAYLISTS_FILE = self.tmp_path / "playlists.json"
         store.save_brands({})
-        store.save_playlists({})
 
     def tearDown(self):
         store.BRANDS_FILE = self._old_brands_file
-        store.PLAYLISTS_FILE = self._old_playlists_file
         self._tmpdir.cleanup()
         super().tearDown()
 
@@ -47,13 +43,13 @@ class PlaylistServiceTests(SimpleTestCase):
 
         self.assertEqual((message, status), (None, None))
         self.assertEqual(playlist["day_parts"][0]["tracks"][0]["src"], "/songs/demo.mp3")
-        self.assertIn("brand-1", store.get_playlists())
 
     def test_remove_tracks_rejects_invalid_daypart_index(self):
         store.save_brands({"brand-1": {"id": "brand-1", "user_id": "user-1"}})
-        store.save_playlists({"brand-1": {"day_parts": [{"tracks": []}]}})
 
-        result, message, status = playlist_service.remove_tracks("brand-1", "user-1", 3, ["song-1"])
+        playlist_data = {"day_parts": [{"tracks": []}]}
+        with patch("api.services.playlist_service._fetch_playlist_from_supabase", return_value=playlist_data):
+            result, message, status = playlist_service.remove_tracks("brand-1", "user-1", 3, ["song-1"])
 
         self.assertEqual(result, None)
         self.assertEqual((message, status), ("Invalid day_part_index", 400))
@@ -70,27 +66,23 @@ class PlaylistServiceTests(SimpleTestCase):
                 }
             }
         )
-        store.save_playlists(
-            {
-                "brand-1": {
-                    "day_parts": [
+        playlist_data = {
+            "day_parts": [
+                {
+                    "name": "Morning",
+                    "tracks": [
                         {
-                            "name": "Morning",
-                            "tracks": [
-                                {
-                                    "song_id": "song-1",
-                                    "title": "Original",
-                                    "url": "songs/original.mp3",
-                                    "duration_seconds": 180,
-                                    "mmr_score": 0.3,
-                                    "bfs": 0.4,
-                                }
-                            ],
+                            "song_id": "song-1",
+                            "title": "Original",
+                            "url": "songs/original.mp3",
+                            "duration_seconds": 180,
+                            "mmr_score": 0.3,
+                            "bfs": 0.4,
                         }
-                    ]
+                    ],
                 }
-            }
-        )
+            ]
+        }
         candidates = [
             {
                 "id": "song-2",
@@ -142,7 +134,9 @@ class PlaylistServiceTests(SimpleTestCase):
                 return 1.0
             return 0.0
 
-        with patch("api.services.playlist_service.fetch_all_songs", return_value=candidates), patch(
+        with patch("api.services.playlist_service._fetch_playlist_from_supabase", return_value=playlist_data), patch(
+            "api.services.playlist_service.fetch_all_songs", return_value=candidates
+        ), patch(
             "api.services.playlist_service.apply_hard_filters",
             return_value=candidates,
         ), patch(

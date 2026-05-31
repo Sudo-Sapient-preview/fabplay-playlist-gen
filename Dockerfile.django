@@ -14,7 +14,7 @@ COPY webapp ./webapp
 COPY brand_pipeline ./brand_pipeline
 COPY pipeline ./pipeline
 COPY web ./web
-COPY data ./data
+RUN mkdir -p data
 
 RUN python manage.py collectstatic --noinput
 RUN addgroup --system app && adduser --system --ingroup app app

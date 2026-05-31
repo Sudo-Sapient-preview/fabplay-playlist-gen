@@ -118,6 +118,9 @@ def update_genres_view(request, brand_id: str):
         request.user_data["id"],
         (payload or {}).get("include_genres"),
         (payload or {}).get("exclude_genres"),
+        (payload or {}).get("include_song_types"),
+        (payload or {}).get("include_artists"),
+        (payload or {}).get("exclude_artists"),
     )
     if not success:
         return err(message or "Save failed", status or 400)

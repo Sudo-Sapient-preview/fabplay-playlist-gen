@@ -15,16 +15,12 @@ class GenerationServiceTests(SimpleTestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self._tmpdir.name)
         self._old_brands_file = store.BRANDS_FILE
-        self._old_playlists_file = store.PLAYLISTS_FILE
         store.BRANDS_FILE = self.tmp_path / "brands.json"
-        store.PLAYLISTS_FILE = self.tmp_path / "playlists.json"
         store.save_brands({})
-        store.save_playlists({})
         tasks._tasks.clear()
 
     def tearDown(self):
         store.BRANDS_FILE = self._old_brands_file
-        store.PLAYLISTS_FILE = self._old_playlists_file
         tasks._tasks.clear()
         self._tmpdir.cleanup()
         super().tearDown()
@@ -158,11 +154,6 @@ class GenerationServiceTests(SimpleTestCase):
         task = tasks.get_task(task_id)
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["progress"], 100)
-
-        playlist = store.get_playlists()["brand-1"]
-        self.assertEqual(len(playlist["day_parts"]), 1)
-        self.assertEqual(playlist["day_parts"][0]["tracks"][0]["song_id"], "song-1")
-        self.assertEqual(playlist["day_parts"][0]["track_count"], 1)
 
         brand = store.get_brands()["brand-1"]
         self.assertEqual(brand["playlist_count"], 1)

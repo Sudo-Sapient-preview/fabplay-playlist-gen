@@ -6,6 +6,7 @@ __pycache__/
 .env
 .env.*
 env/
+venv/
 .venv/
 .codex-temp/
 .git/

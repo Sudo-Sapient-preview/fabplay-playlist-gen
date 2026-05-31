@@ -9,8 +9,8 @@ from django.shortcuts import redirect, render
 STATIC_DIR = Path(settings.BASE_DIR) / "web" / "static"
 
 
-def index(_request):
-    return redirect("/login")
+def index(request):
+    return render(request, "landing.html")
 
 
 def login_page(request):
@@ -22,7 +22,10 @@ def auth_callback(request):
 
 
 def dashboard(request, path=""):
-    return render(request, "index.html")
+    response = render(request, "index.html")
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response["Pragma"] = "no-cache"
+    return response
 
 
 def favicon(_request):

@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+import uuid
 from datetime import datetime, timezone
 
 from api.db import get_supabase
@@ -16,7 +17,7 @@ from pipeline.rag_retriever import (
 
 from api.activity import log_activity
 from api.services.ai_service import chat_client
-from api.store import get_brands, get_playlists, save_brands, save_playlists
+from api.store import get_brands, save_brands
 from api.tasks import get_task, new_task, task_done, task_error, task_log, task_progress
 from api.utils import fmt_daypart, pipeline_inputs
 
@@ -45,18 +46,20 @@ def _resolved_category(raw_category: str) -> str:
     return raw_category if raw_category in DAY_PART_TEMPLATES else "cafe"
 
 
-def _sync_playlist_artifacts(brand_id: str, user_id: str | None, playlist_result: dict, assembled: list[dict]) -> None:
+def _sync_playlist_artifacts(brand_id: str, user_id: str | None, playlist_result: dict, assembled: list[dict], brand_name: str = "", playlist_name: str = "") -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
+    playlist_id = playlist_result.get("playlist_id", "")
     try:
-        get_supabase().table("brand_playlists").upsert(
-            {
-                "brand_id": brand_id,
-                "user_id": user_id,
-                "playlist_json": playlist_result,
-                "updated_at": now_iso,
-            },
-            on_conflict="brand_id",
-        ).execute()
+        row = {
+            "brand_id": brand_id,
+            "user_id": user_id,
+            "playlist_name": playlist_name or brand_name,
+            "playlist_json": playlist_result,
+            "updated_at": now_iso,
+        }
+        if playlist_id:
+            row["playlist_id"] = playlist_id
+        get_supabase().table("brand_playlists").upsert(row, on_conflict="brand_id").execute()
     except Exception as exc:
         logger.warning("Could not save playlist to brand_playlists: %s", exc)
 
@@ -79,6 +82,7 @@ def _sync_playlist_artifacts(brand_id: str, user_id: str | None, playlist_result
             {
                 "user_id": user_id,
                 "brand_id": brand_id,
+                "brand_name": brand_name,
                 "song_id": song_id,
                 "song_name": song_name,
                 "generated_at": now_iso,
@@ -101,6 +105,11 @@ def _bg_soundboard(brand_id: str, task_id: str) -> None:
         task_progress(task_id, 10, "Analysing brand identity...")
         client, deployment = chat_client()
         inputs = pipeline_inputs(brand)
+
+        # If no asset_analysis was stored (no PDF uploaded, no website scraped),
+        # fall back to the brand description so get_brand_profile has rich context.
+        if not inputs.get("asset_analysis") and inputs.get("brand_description"):
+            inputs["asset_analysis"] = f"[Brand Description]\n{inputs['brand_description']}"
 
         brand_profile = get_brand_profile(inputs, client, deployment)
         brand_profile.setdefault("brand_name", brand["brand_name"])
@@ -154,6 +163,8 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
             task_progress(task_id, 5, "Generating brand profile...")
             client, deployment = chat_client()
             inputs = _apply_genre_overrides(pipeline_inputs(brand), genre_overrides)
+            if not inputs.get("asset_analysis") and inputs.get("brand_description"):
+                inputs["asset_analysis"] = f"[Brand Description]\n{inputs['brand_description']}"
             brand_profile = get_brand_profile(inputs, client, deployment)
             brand_profile.setdefault("brand_name", brand["brand_name"])
             brand_profile.setdefault("customer_description", brand.get("customer_description", ""))
@@ -271,7 +282,10 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
             assembled.append(fmt_daypart(day_part, playlist))
 
         sound_board_summary = sound_board_result.get("sound_board", {})
+        playlist_id = str(uuid.uuid4())
+        now_iso = datetime.now(timezone.utc).isoformat()
         playlist_result = {
+            "playlist_id": playlist_id,
             "brand_profile": brand_profile,
             "sound_board": {
                 "brand_summary": brand_profile.get("brand_summary", ""),
@@ -287,29 +301,35 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
                 "speechiness_target": 0.2,
             },
             "day_parts": assembled,
+            "created_at": now_iso,
         }
 
-        playlists = get_playlists()
-        playlists[brand_id] = playlist_result
-        save_playlists(playlists)
+        # Determine playlist name before saving to Supabase
+        is_first_playlist = brand.get("playlist_count", 0) == 0
+        if playlist_name and is_first_playlist:
+            resolved_name = playlist_name.strip()
+        elif brand.get("playlist_name"):
+            resolved_name = brand["playlist_name"]
+        else:
+            resolved_name = playlist_name.strip() if playlist_name else brand.get("brand_name", "")
 
         user_id = brand.get("user_id")
-        _sync_playlist_artifacts(brand_id, user_id, playlist_result, assembled)
+        _sync_playlist_artifacts(brand_id, user_id, playlist_result, assembled, brand.get("brand_name", ""), resolved_name)
 
         brands = get_brands()
         if brand_id not in brands:
             task_error(task_id, f"Brand {brand_id} not found")
             return
-        is_first_playlist = brands[brand_id].get("playlist_count", 0) == 0
-        now_iso = datetime.now(timezone.utc).isoformat()
         brands[brand_id]["playlist_count"] = brands[brand_id].get("playlist_count", 0) + 1
         brands[brand_id]["last_updated"] = now_iso
         brands[brand_id]["last_generated_at"] = now_iso
         brands[brand_id]["status"] = "active"
-        if playlist_name and is_first_playlist:
-            brands[brand_id]["playlist_name"] = playlist_name.strip()
-        elif not brands[brand_id].get("playlist_name"):
-            brands[brand_id]["playlist_name"] = brands[brand_id].get("brand_name", "")
+        brands[brand_id]["playlist_name"] = resolved_name
+
+        history = brands[brand_id].get("playlist_history", [])
+        history.append({"id": playlist_id, "name": resolved_name, "created_at": now_iso})
+        brands[brand_id]["playlist_history"] = history
+        brands[brand_id]["current_playlist_id"] = playlist_id
         save_brands(brands)
 
         log_activity("Playlists generated (MMR)", brand["brand_name"])

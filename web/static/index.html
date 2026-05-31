@@ -3,15 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>fabPLAY — Brand Intelligence</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Brandbeat</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/500-italic.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2/dist/chartjs-plugin-dragdata.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 <script>tailwind.config={corePlugins:{preflight:false}}</script>
 </head>
@@ -26,7 +27,7 @@
 
 <!-- Top bar: logo + sign out -->
 <div class="topbar">
-  <img src="/static/logo.jpg" alt="fabPLAY" class="topbar-logo">
+  <a href="/" class="wm topbar-wm" aria-label="brandbeat"><span class="wm-b">b</span><span class="wm-rest">randbeat</span></a>
   <div class="topbar-account">
     <span class="topbar-email" x-text="currentUser?.email||''"></span>
     <button @click="logout()" class="topbar-signout">Sign Out</button>
@@ -90,40 +91,93 @@
 <div x-show="page==='playlists-home'" class="fade" id="page-playlists-home">
   <div class="page-header">
     <div class="page-header-copy">
-      <h1 class="page-title">My Playlists</h1>
-      <p class="page-sub" x-text="brands.filter(b=>(b.playlist_count||0)>0).length+' playlist'+(brands.filter(b=>(b.playlist_count||0)>0).length!==1?'s':'')"></p>
+      <h1 class="page-title">My Brands</h1>
+      <p class="page-sub" x-text="brands.length+' brand'+(brands.length!==1?'s':'')"></p>
     </div>
-    <button @click="page='brand-create'" class="btn btn-r">+ Add Another Playlist</button>
+    <button @click="page='brand-create'" class="btn btn-r">+ New Brand</button>
   </div>
   <div class="page-body">
     <!-- Empty state -->
-    <div x-show="!brands.filter(b=>(b.playlist_count||0)>0).length" class="card py-20 text-center">
-      <div class="empty-ico">🎵</div>
-      <p class="font-semibold mt-3">No playlists yet</p>
-      <p class="text-sm text-[var(--muted)] mt-1">Create your first playlist to get started</p>
-      <button @click="page='brand-create'" class="btn btn-r mt-5">Create Playlist</button>
+    <div x-show="!brands.length" class="card py-20 text-center">
+      <div class="empty-ico">🏪</div>
+      <p class="font-semibold mt-3">No brands yet</p>
+      <p class="text-sm text-[var(--muted)] mt-1">Create your first brand to start generating playlists</p>
+      <button @click="page='brand-create'" class="btn btn-r mt-5">Create Brand</button>
     </div>
-    <!-- Grid -->
+    <!-- Grid — all brands -->
     <div class="playlist-grid">
-      <template x-for="b in brands.filter(b=>(b.playlist_count||0)>0)" :key="b.id">
-        <div class="brand-card" style="position:relative;cursor:pointer" @click="openPlaylist(b.id)">
+      <template x-for="b in brands" :key="b.id">
+        <!-- Card expands in-place on hover -->
+        <div class="brand-card"
+             :class="brandHoverDropdowns[b.id]?.open ? 'brand-card-expanded' : ''"
+             style="position:relative;cursor:default"
+             @mouseenter="onBrandCardMouseenter(b.id)"
+             @mouseleave="onBrandCardMouseleave(b.id)">
+
+          <!-- Card header (always visible) -->
           <div style="pointer-events:none">
             <div class="flex items-center gap-3 mb-3">
               <div class="brand-emoji" :style="'background:'+catColor(b.category)+'15'" x-text="catEmoji(b.category)"></div>
               <div style="flex:1;min-width:0">
-                <div class="font-bold text-sm playlist-card-title" x-text="b.playlist_name||b.brand_name"></div>
+                <div class="font-bold text-sm playlist-card-title" x-text="b.brand_name"></div>
                 <div class="text-xs mt-0.5" style="color:var(--faint)" x-text="catLabel(b.category)"></div>
               </div>
             </div>
-            <div class="flex items-center text-xs mt-auto pt-2" style="border-top:1px solid var(--bdr);color:var(--faint)">
-              <span x-text="b.last_generated_at?'Generated '+_timeAgo(b.last_generated_at):b.last_updated?'Updated '+_timeAgo(b.last_updated):'—'"></span>
+            <!-- Footer: "X playlists" left · "Last generated Y ago" right -->
+            <div class="flex items-center justify-between text-xs pt-2" style="border-top:1px solid var(--bdr);color:var(--faint)">
+              <span x-text="(b.playlist_count||0)+' playlist'+((b.playlist_count||0)!==1?'s':'')"></span>
+              <span x-text="b.last_generated_at?'Last generated '+_timeAgo(b.last_generated_at):''"></span>
             </div>
           </div>
+
+          <!-- ── Expanded section (inline, appears on hover) ── -->
+          <div x-show="brandHoverDropdowns[b.id]?.open"
+               style="margin-top:14px;padding-top:2px">
+
+            <!-- Loading -->
+            <div x-show="brandHoverDropdowns[b.id]?.loading"
+                 style="display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 0;font-size:12px;color:var(--faint)">
+              <span style="display:inline-block;width:13px;height:13px;border:2px solid #ECE7DC;border-top:2px solid var(--red);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0"></span>
+              Loading…
+            </div>
+
+            <!-- Playlist rows -->
+            <template x-if="brandHoverDropdowns[b.id]?.loaded && !brandHoverDropdowns[b.id]?.loading">
+              <div>
+                <!-- No playlists state -->
+                <div x-show="!brandHoverDropdowns[b.id].playlists.length"
+                     style="font-size:12px;color:var(--faint);padding:6px 0 10px;text-align:center">
+                  No playlists yet
+                </div>
+                <!-- Each playlist row -->
+                <template x-for="pl in brandHoverDropdowns[b.id].playlists" :key="pl.playlist_id">
+                  <div @click="openPlaylistFromDropdown(b.id, pl.playlist_id)"
+                       style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:opacity .12s"
+                       @mouseenter="$el.style.opacity='.75'"
+                       @mouseleave="$el.style.opacity='1'">
+                    <!-- Music note icon -->
+                    <svg style="width:14px;height:14px;flex-shrink:0;color:var(--faint)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+                    <span style="flex:1;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="pl.playlist_name||'Untitled Playlist'"></span>
+                    <span style="font-size:12px;color:var(--faint);flex-shrink:0" x-text="pl.track_count+' tracks'"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- + New Playlist — solid red full-width button -->
+            <button @click="openSoundboardFromDropdown(b.id)"
+                    class="btn btn-r"
+                    style="width:100%;margin-top:12px;justify-content:center;padding:11px;font-size:13px;font-weight:600;border-radius:8px">
+              + New Playlist
+            </button>
+          </div>
+
           <!-- 3-dot menu -->
           <div class="playlist-card-menu" @click.stop x-data="{open:false}">
             <button @click="open=!open" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px 6px;border-radius:4px;font-size:18px;line-height:1">⋮</button>
             <div x-show="open" @click.away="open=false" style="position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--bdr);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:130px;overflow:hidden">
-              <button @click="openRenameModal(b.id,b.playlist_name||b.brand_name);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:var(--text)">Rename</button>
+              <button x-show="(b.playlist_count||0)>0" @click="openRenameModal(b.id,b.playlist_name||b.brand_name);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:var(--text)">Rename</button>
+              <button x-show="(b.playlist_count||0)>0" @click="exportPlaylistPDF(b);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:var(--text)">Share (PDF)</button>
               <button @click="deleteBrand(b.id,b.playlist_name||b.brand_name);open=false" style="display:block;width:100%;text-align:left;padding:10px 16px;font-size:13px;font-family:inherit;background:none;border:none;cursor:pointer;color:#DC2626">Delete</button>
             </div>
           </div>
@@ -323,27 +377,37 @@
     <div x-show="createStep===3" class="card p-6 space-y-5">
       <h3 class="font-bold">Music Preferences</h3>
       <div>
-        <label class="lbl mb-2">Must-Include Genres</label>
+        <label class="lbl mb-1">Genres</label>
+        <p class="text-xs text-[var(--muted)] mb-2">Click to <span class="font-semibold" style="color:#10B981">include</span> · Double-click to <span class="font-semibold" style="color:var(--red)">exclude</span> · Click again to clear</p>
         <div class="flex flex-wrap gap-2">
-          <template x-for="g in genres.filter(g=>!form.exclude_genres.includes(g))" :key="g">
-            <button type="button" @click="toggleGenre('include_genres',g,form)" :class="form.include_genres.includes(g)?'genre-btn active-include':'genre-btn'" x-text="g"></button>
+          <template x-for="g in genres" :key="g">
+            <button type="button"
+              @click="handleStepGenreClick(g)"
+              @dblclick="handleStepGenreDblClick(g)"
+              :class="genreState(g)==='include'?'genre-btn active-include':genreState(g)==='exclude'?'genre-btn active-exclude':'genre-btn'"
+              x-text="(genreState(g)==='include'?'✓ ':genreState(g)==='exclude'?'✕ ':'')+g"></button>
           </template>
         </div>
       </div>
       <div>
-        <label class="lbl mb-2">Must-Exclude Genres</label>
+        <label class="lbl mb-2">Labels</label>
+        <p class="text-xs text-[var(--muted)] mb-2">Click to <span class="font-semibold" style="color:#10B981">include</span> · Double-click to <span class="font-semibold" style="color:var(--red)">exclude</span> · Click again to clear</p>
         <div class="flex flex-wrap gap-2">
-          <template x-for="g in genres.filter(g=>!form.include_genres.includes(g))" :key="g">
-            <button type="button" @click="toggleGenre('exclude_genres',g,form)" :class="form.exclude_genres.includes(g)?'genre-btn active-exclude':'genre-btn'" x-text="g"></button>
+          <template x-for="a in Object.keys(LABEL_CODES)" :key="a">
+            <button type="button"
+              @click="handleStepLabelClick(a)"
+              @dblclick="handleStepLabelDblClick(a)"
+              :class="labelState(a)==='include'?'genre-btn active-include':labelState(a)==='exclude'?'genre-btn active-exclude':'genre-btn'"
+              x-text="(labelState(a)==='include'?'✓ ':labelState(a)==='exclude'?'✕ ':'')+labelDisplay(a)"></button>
           </template>
         </div>
       </div>
       <div>
         <label class="lbl mb-2">Song Type</label>
-        <div class="flex gap-2">
-          <button type="button" @click="form.include_song_types='all'" :class="form.include_song_types==='all'?'chip-btn chip-on':'chip-btn'">All</button>
-          <button type="button" @click="form.include_song_types='vocal'" :class="form.include_song_types==='vocal'?'chip-btn chip-on':'chip-btn'">Vocal</button>
-          <button type="button" @click="form.include_song_types='instrumental'" :class="form.include_song_types==='instrumental'?'chip-btn chip-on':'chip-btn'">Instrumental</button>
+        <div class="flex gap-2 items-center">
+          <button type="button" @click="toggleFormVocals()" :class="formVocalsOn?'chip-btn chip-on':'chip-btn'">Vocals</button>
+          <button type="button" @click="toggleFormInstrumentals()" :class="formInstrumentalsOn?'chip-btn chip-on':'chip-btn'">Instrumentals</button>
+          <span x-show="formVocalsOn&&formInstrumentalsOn" class="text-xs text-[var(--faint)]">= Mixed</span>
         </div>
       </div>
       <div class="toggle-row p-3 rounded-lg" style="border:1px solid var(--bdr)">
@@ -378,8 +442,9 @@
       <div class="flex justify-between pt-2">
         <button @click="createStep--" class="btn btn-w">← Back</button>
         <button @click="submitBrand()" class="btn btn-green" :disabled="submitting">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          <span x-text="submitting?'Creating...':'Generate Soundboard'"></span>
+          <svg x-show="!submitting" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg x-show="submitting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          <span x-text="submitting?'Creating…':'Create Brand'"></span>
         </button>
       </div>
     </div>
@@ -390,7 +455,7 @@
 <div x-show="page==='soundboard'" class="fade" id="page-soundboard">
   <div class="page-header">
     <div class="flex items-center gap-3">
-      <button @click="goHome()" class="btn-back" title="My Playlists"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button @click="goBackToBrand()" class="btn-back" title="Back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
       <div>
         <div class="flex items-center gap-2">
           <h1 class="page-title" x-text="curBrand?.brand_name||'Sound Board'"></h1>
@@ -488,17 +553,33 @@
         <button :disabled="!sbGenreDirty" @click="saveGenreChanges()" class="btn btn-r" :style="!sbGenreDirty?'opacity:0.35;cursor:not-allowed;pointer-events:none':''">Save Changes</button>
       </div>
       <div class="mb-4">
-        <label class="lbl mb-2">Song Type</label>
-        <div class="flex gap-2">
-          <button type="button" @click="sbSongType='all'; sbGenreDirty=true" :class="sbSongType==='all'?'chip-btn chip-on':'chip-btn'">All</button>
-          <button type="button" @click="sbSongType='vocal'; sbGenreDirty=true" :class="sbSongType==='vocal'?'chip-btn chip-on':'chip-btn'">Vocal</button>
-          <button type="button" @click="sbSongType='instrumental'; sbGenreDirty=true" :class="sbSongType==='instrumental'?'chip-btn chip-on':'chip-btn'">Instrumental</button>
+        <label class="lbl mb-2">Song Type <span class="text-[11px] font-normal text-[var(--faint)]" x-text="'— '+sbSongTypeLabel"></span></label>
+        <div class="flex gap-2 items-center">
+          <button type="button" @click="toggleSbVocals()" :class="sbVocalsOn?'chip-btn chip-on':'chip-btn'">Vocals</button>
+          <button type="button" @click="toggleSbInstrumentals()" :class="sbInstrumentalsOn?'chip-btn chip-on':'chip-btn'">Instrumentals</button>
         </div>
       </div>
-      <p class="text-xs text-[var(--muted)] mb-3">Click to cycle: <span style="color:#10B981" class="font-semibold">Include</span> → <span style="color:var(--red)" class="font-semibold">Exclude</span> → Neutral. Save to apply to next playlist.</p>
+      <div class="mb-4">
+        <label class="lbl mb-2">Labels</label>
+        <p class="text-xs text-[var(--muted)] mb-2">Click to <span style="color:#10B981" class="font-semibold">include</span> · Double-click to <span style="color:var(--red)" class="font-semibold">exclude</span> · Click again to clear</p>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in Object.keys(LABEL_CODES)" :key="a">
+            <button type="button"
+              @click="handleSbLabelClick(a)"
+              @dblclick="handleSbLabelDblClick(a)"
+              :class="sbLabelExcluded(a)?'genre-btn active-exclude':(sbLabelIncluded(a)?'genre-btn active-include':'genre-btn')"
+              x-text="(sbLabelIncluded(a)?'✓ ':sbLabelExcluded(a)?'✕ ':'')+labelDisplay(a)"></button>
+          </template>
+        </div>
+      </div>
+      <p class="text-xs text-[var(--muted)] mb-3">Click to <span style="color:#10B981" class="font-semibold">include</span> · Double-click to <span style="color:var(--red)" class="font-semibold">exclude</span> · Click again to clear. Save to apply to next playlist.</p>
       <div class="flex flex-wrap gap-2">
         <template x-for="g in genres" :key="g">
-          <button type="button" @click="toggleSbGenre(g)" :class="sbExcluded(g)?'genre-btn active-exclude':(sbIncluded(g)?'genre-btn active-include':'genre-btn')" x-text="(sbIncluded(g)?'✓ ':sbExcluded(g)?'✕ ':'')+g"></button>
+          <button type="button"
+            @click="handleSbGenreClick(g)"
+            @dblclick="handleSbGenreDblClick(g)"
+            :class="sbExcluded(g)?'genre-btn active-exclude':(sbIncluded(g)?'genre-btn active-include':'genre-btn')"
+            x-text="(sbIncluded(g)?'✓ ':sbExcluded(g)?'✕ ':'')+g"></button>
         </template>
       </div>
     </div>
@@ -529,16 +610,16 @@
         x-show="curPl && !sbNeedsGeneration && !(sbAcousticDirty||sbGenreDirty||sbTimelineDirty||sbProfileDirty)">
         View Day Part Playlists
       </button>
-      <!-- No playlist, or changes saved needing regen, or unsaved changes → Generate -->
+      <!-- Generate button — always visible, only disabled when there are unsaved changes -->
       <button @click="generatePlaylist(curBrand?.id)" class="btn btn-r"
-        x-show="!curPl || sbNeedsGeneration || (sbAcousticDirty||sbGenreDirty||sbTimelineDirty||sbProfileDirty)"
         :disabled="sbAcousticDirty||sbGenreDirty||sbTimelineDirty||sbProfileDirty"
         :title="(sbAcousticDirty||sbGenreDirty||sbTimelineDirty||sbProfileDirty)?'Save all section changes first':''">
-        <span x-text="curPl ? 'Generate New Playlist' : 'Generate Playlist'"></span>
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        <span x-text="curPl ? 'New Playlist' : 'Generate Playlist'"></span>
       </button>
     </div>
   </div>
-  <div x-show="!curPl && !curBrand?.sound_board_result" class="p-16 text-center">
+  <div x-show="!curPl && !curBrand?.sound_board_result && !showGen" class="p-16 text-center">
     <div class="empty-ico">🎚️</div>
     <p class="font-semibold mt-3">No sound board generated yet</p>
     <p class="text-sm text-[var(--muted)] mt-1">Create a brand to see its sound board</p>
@@ -549,9 +630,9 @@
 <div x-show="page==='playlists'" class="fade" id="page-playlists">
   <div class="page-header">
     <div class="flex items-center gap-3">
-      <button @click="goHome()" class="btn-back" title="My Playlists"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button @click="goBackToBrand()" class="btn-back" title="Back"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
       <div>
-        <h1 class="page-title" x-text="curBrand?.playlist_name||curBrand?.brand_name||'Playlist'"></h1>
+        <h1 class="page-title" x-text="curPl?.playlist_name||curBrand?.playlist_name||curBrand?.brand_name||'Playlist'"></h1>
         <p class="page-sub" x-text="(curBrand?.brand_name||'')+(curPl?.day_parts?.length?' — '+curPl.day_parts.length+' time slots':'')"></p>
       </div>
     </div>
@@ -566,7 +647,21 @@
       </button>
     </div>
   </div>
-  <div class="page-body" x-show="curPl?.day_parts?.length">
+  <!-- Loading spinner -->
+  <div x-show="plLoading" class="page-body" style="display:flex;align-items:center;justify-content:center;padding:60px 0;gap:10px;color:var(--faint);font-size:13px">
+    <span style="display:inline-block;width:18px;height:18px;border:2px solid #ECE7DC;border-top:2px solid var(--red);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0"></span>
+    Loading playlist…
+  </div>
+  <!-- Not found / error state -->
+  <div x-show="!plLoading && !curPl?.day_parts?.length" class="page-body">
+    <div class="card py-16 text-center">
+      <div class="empty-ico">🎵</div>
+      <p class="font-semibold mt-3">Playlist not found</p>
+      <p class="text-sm mt-1" style="color:var(--muted)">This playlist may have been removed or is unavailable.</p>
+      <button @click="goHome()" class="btn btn-r mt-5">← Back to Brands</button>
+    </div>
+  </div>
+  <div class="page-body" x-show="!plLoading && curPl?.day_parts?.length">
     <div class="flex gap-1 overflow-x-auto pb-2 mb-5">
       <template x-for="(dp,i) in (curPl?.day_parts??[])" :key="i">
         <button @click="activeDp=i;plGenreFilter=''" class="dp-tab" :class="activeDp===i?'on':''">
@@ -648,8 +743,13 @@
                 <button x-show="suggestingTrack!==activeDp+'-'+t._origIdx"
                         @click="suggestTracks(activeDp,t._origIdx,t.song_id)"
                         title="Add 8 similar songs to this day-part"
-                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors font-bold text-base leading-none">
-                  ~
+                        class="text-[var(--faint)] hover:text-[var(--accent)] bg-transparent border-0 p-0 cursor-pointer outline-none transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="10" cy="10" r="7"/>
+                    <line x1="15" y1="15" x2="20" y2="20"/>
+                    <ellipse cx="8.5" cy="12.5" rx="2.2" ry="1.5" fill="currentColor" stroke="none"/>
+                    <line x1="10.7" y1="11.2" x2="10.7" y2="7" stroke-width="1.5"/>
+                  </svg>
                 </button>
                 <span x-show="suggestingTrack===activeDp+'-'+t._origIdx" class="inline-block w-3.5 h-3.5 border-2 border-[var(--faint)] border-t-[var(--accent)] rounded-full animate-spin"></span>
               </div>
@@ -951,7 +1051,7 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=24"></script>
+<script src="/static/app.js?v=33"></script>
 </body>
 </html>
 

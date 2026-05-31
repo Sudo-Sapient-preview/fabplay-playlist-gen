@@ -10,6 +10,15 @@ def get_genres() -> dict:
         return {"genres": [], "error": str(exc)}
 
 
+def get_artists() -> dict:
+    try:
+        songs = fetch_all_songs()
+        artists = sorted({song.get("artist") for song in songs if song.get("artist")})
+        return {"artists": artists}
+    except Exception as exc:
+        return {"artists": [], "error": str(exc)}
+
+
 def get_catalog_stats() -> dict:
     try:
         response = get_supabase().table("songs").select("id", count="exact").execute()
@@ -25,7 +34,7 @@ def get_sample_songs(limit: int = 50) -> dict:
             .table("songs")
             .select(
                 "id,title,artist,genre,url,tempo_bpm,energy,valence,"
-                "danceability,acousticness,instrumentalness,loudness,speechness,duration_seconds"
+                "danceability,acousticness,instrumentalness,loudness,speechness,duration_seconds,song_type"
             )
             .limit(limit)
             .execute()

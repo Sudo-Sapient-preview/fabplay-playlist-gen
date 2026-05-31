@@ -34,7 +34,7 @@ _EXCLUDED_GENRES: set[str] = {"christian devotional"}
 _SONG_COLS = (
     "id,title,artist,url,tempo_bpm,duration_seconds,"
     "energy,danceability,loudness,acousticness,instrumentalness,"
-    "speechness,genre,valence"
+    "speechness,genre,valence,arousal,mood_predicted_labels,song_type"
 )
 _ENERGY_MAX = 0.15
 _VALENCE_MAX = 9.0
@@ -178,6 +178,46 @@ def fetch_songs_not_yet_embedded() -> list[dict]:
 
 def upsert_embeddings(rows: list[dict]) -> None:
     get_supabase().table("song_embeddings").upsert(rows, on_conflict="song_id").execute()
+
+
+def fetch_songs_without_maest() -> list[dict]:
+    """Return songs that don't yet have a maest_audio_768 in analysis_song_features."""
+    all_songs = fetch_all_songs()
+    resp = (
+        get_supabase()
+        .table("analysis_song_features")
+        .select("song_id")
+        .not_.is_("maest_audio_768", "null")
+        .execute()
+    )
+    done_ids = {row["song_id"] for row in (resp.data or [])}
+    return [s for s in all_songs if str(s.get("id", "")) not in done_ids]
+
+
+def upsert_maest_audio_768s(rows: list[dict]) -> None:
+    """Write maest_audio_768 vectors into analysis_song_features.
+
+    Updates existing rows and inserts rows for songs not yet in the table.
+    Works without requiring a unique constraint on song_id.
+    """
+    client = get_supabase()
+    song_ids = [r["song_id"] for r in rows]
+
+    existing = (
+        client.table("analysis_song_features")
+        .select("song_id")
+        .in_("song_id", song_ids)
+        .execute()
+    )
+    existing_ids = {r["song_id"] for r in (existing.data or [])}
+
+    for row in rows:
+        if row["song_id"] in existing_ids:
+            client.table("analysis_song_features").update(
+                {"maest_audio_768": row["maest_audio_768"]}
+            ).eq("song_id", row["song_id"]).execute()
+        else:
+            client.table("analysis_song_features").insert(row).execute()
 
 
 def search_by_embedding(

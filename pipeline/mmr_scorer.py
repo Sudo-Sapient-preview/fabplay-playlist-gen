@@ -5,7 +5,8 @@ Performance strategy
 --------------------
 * Feature vectors (n × 6) and CLAP embedding matrix (n × 512) stacked once.
 * Relevance uses compute_relevance(): weighted L2 + arousal + mood boosts.
-* Diversity uses CLAP cosine when embeddings are present, L2 fallback otherwise.
+* Diversity uses CLAP 512-dim cosine for playlist generation (primary).
+* MAEST 768-dim cosine is reserved for song replacement / suggest-similar only.
 * max_sim maintained as a numpy array with O(n) incremental updates per pick.
 * Total complexity: O(n*k) numpy ops, all vectorised.
 """
@@ -164,6 +165,23 @@ def compute_relevance(track: dict, dp: dict) -> float:
 
 
 def compute_track_sim(track_a: dict, track_b: dict) -> float:
+    """CLAP-based diversity — used for playlist MMR. Do not use for replacement."""
+    emb_a = track_a.get("clap_audio_512")
+    emb_b = track_b.get("clap_audio_512")
+    if emb_a and emb_b:
+        return _cosine_similarity(emb_a, emb_b)
+    # Fallback: weighted L2 on audio features
+    diff = (_track_vec(track_a) - _track_vec(track_b)) * _SW
+    return float(max(0.0, 1.0 - math.sqrt(float(np.dot(diff, diff)))))
+
+
+def compute_maest_sim(track_a: dict, track_b: dict) -> float:
+    """MAEST audio-to-audio similarity — use only for replace_track and suggest_similar."""
+    emb_a = track_a.get("maest_audio_768")
+    emb_b = track_b.get("maest_audio_768")
+    if emb_a and emb_b:
+        return _cosine_similarity(emb_a, emb_b)
+    # Fallback: CLAP
     emb_a = track_a.get("clap_audio_512")
     emb_b = track_b.get("clap_audio_512")
     if emb_a and emb_b:

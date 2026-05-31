@@ -166,10 +166,19 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 
 # ─── Analysis features (clap_audio_512, mood, arousal) ───────────────────────
 
-def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
-    """Fetch maest_audio_768 + clap_audio_512 from analysis_song_features; mood_predicted_labels + arousal from songs."""
+def _fetch_analysis_features(song_ids: list[str], include_maest: bool = False) -> dict[str, dict]:
+    """Fetch CLAP, mood, and arousal from analysis_song_features.
+
+    Pass include_maest=True only for the song replacement / suggest-similar path.
+    Playlist generation does not need MAEST vectors.
+    """
     if not song_ids:
         return {}
+    # analysis_song_features only has clap_audio_512 and maest_audio_768
+    # arousal and mood_predicted_labels come from the songs table via fetch_all_songs()
+    cols = "song_id,clap_audio_512"
+    if include_maest:
+        cols = "song_id,maest_audio_768,clap_audio_512"
     client = get_supabase()
     features: dict[str, dict] = {}
     batch_size = 500
@@ -177,34 +186,22 @@ def _fetch_analysis_features(song_ids: list[str]) -> dict[str, dict]:
         batch = song_ids[i : i + batch_size]
         rows = (
             client.table("analysis_song_features")
-            .select("song_id,maest_audio_768,clap_audio_512")
+            .select(cols)
             .in_("song_id", batch)
             .execute()
             .data or []
         )
         for row in rows:
             features[str(row["song_id"])] = {
-                "maest_audio_768":       row.get("maest_audio_768"),
-                "clap_audio_512":        row.get("clap_audio_512"),
-                "mood_predicted_labels": None,
-                "arousal":               None,
+                "maest_audio_768": row.get("maest_audio_768"),
+                "clap_audio_512":  row.get("clap_audio_512"),
             }
-        song_rows = (
-            client.table("songs")
-            .select("id,mood_predicted_labels,arousal")
-            .in_("id", batch)
-            .execute()
-            .data or []
-        )
-        for row in song_rows:
-            sid = str(row["id"])
-            entry = features.setdefault(sid, {"maest_audio_768": None, "clap_audio_512": None, "mood_predicted_labels": None, "arousal": None})
-            entry["mood_predicted_labels"] = row.get("mood_predicted_labels")
-            entry["arousal"] = row.get("arousal")
     return features
 
 
 def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> None:
+    # Only attaches embedding vectors from analysis_song_features.
+    # arousal and mood_predicted_labels already exist on songs from fetch_all_songs().
     for song in songs:
         sid = str(song.get("song_id", song.get("id", "")))
         f = features.get(sid)
@@ -214,10 +211,6 @@ def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> N
             song["maest_audio_768"] = f["maest_audio_768"]
         if f.get("clap_audio_512"):
             song["clap_audio_512"] = f["clap_audio_512"]
-        if f.get("mood_predicted_labels") is not None:
-            song["mood_predicted_labels"] = f["mood_predicted_labels"]
-        if f.get("arousal") is not None:
-            song["arousal"] = f["arousal"]
 
 
 # ─── Music notes constraint parser ───────────────────────────────────────────

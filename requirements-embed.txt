@@ -1,0 +1,13 @@
+# Dependencies for the MAEST embedding pipeline (pipeline/embed_maest.py).
+# Install on the machine used to generate embeddings — NOT needed on the web server.
+#
+#   pip install -r requirements-embed.txt
+#
+# A GPU is strongly recommended; CPU is possible but very slow.
+
+git+https://github.com/palonso/MAEST.git
+torch>=2.0
+torchaudio>=2.0
+librosa>=0.10
+soundfile>=0.12
+requests>=2.28

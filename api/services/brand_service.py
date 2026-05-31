@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
@@ -5,13 +6,12 @@ from typing import Any, Callable, Iterable
 from brand_pipeline.day_part_templates import DAY_PART_TEMPLATES
 
 from api.activity import log_activity
+from api.db import get_supabase
 from api.store import (
     delete_brand as store_delete_brand,
     get_brand,
     get_brands,
-    get_playlists,
     save_brands,
-    save_playlists,
 )
 
 
@@ -33,6 +33,7 @@ _BRAND_DEFAULTS: dict[str, Any] = {
     "include_artists": [], "exclude_artists": [],
     "filter_explicit": True, "music_notes": "", "asset_analysis": "",
     "has_brand_guidelines": False,
+    "include_song_types": "all",
 }
 
 
@@ -72,7 +73,58 @@ def _mutate(brand_id: str, user_id: str, fn: Callable[[dict], Result | None]) ->
     return OK
 
 
+def _sync_brands_from_supabase(user_id: str) -> None:
+    """Pull any brands from brand_playlists that are missing from local JSON (cross-device sync)."""
+    try:
+        resp = (
+            get_supabase()
+            .table("brand_playlists")
+            .select("brand_id, playlist_json")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception:
+        return
+
+    if not rows:
+        return
+
+    brands = get_brands()
+    changed = False
+    for row in rows:
+        brand_id = row.get("brand_id")
+        if not brand_id or brand_id in brands:
+            continue
+        pj = row.get("playlist_json") or {}
+        if isinstance(pj, str):
+            try:
+                pj = json.loads(pj)
+            except Exception:
+                pj = {}
+        bp = pj.get("brand_profile") or {}
+        brand_name = bp.get("brand_name") or brand_id
+        brands[brand_id] = {
+            "id": brand_id,
+            "user_id": user_id,
+            "brand_name": brand_name,
+            "category": "",
+            "status": "active",
+            "playlist_count": 1,
+            "playlist_name": brand_name,
+            "last_updated": _now(),
+            "last_generated_at": None,
+            "brand_profile": bp,
+            "sound_board_result": pj.get("sound_board"),
+        }
+        changed = True
+
+    if changed:
+        save_brands(brands)
+
+
 def list_brands_for_user(user_id: str) -> list[dict]:
+    _sync_brands_from_supabase(user_id)
     return [b for b in get_brands().values() if b.get("user_id") == user_id]
 
 
@@ -112,9 +164,11 @@ def delete_brand(brand_id: str, user_id: str) -> Result:
     brand = get_brand(brand_id) or {}
     name = brand.get("brand_name", "")
     store_delete_brand(brand_id)
-    playlists = get_playlists()
-    if playlists.pop(brand_id, None) is not None:
-        save_playlists(playlists)
+    try:
+        get_supabase().table("brand_playlists").delete().eq("brand_id", brand_id).execute()
+        get_supabase().table("user_playlist_songs").delete().eq("brand_id", brand_id).execute()
+    except Exception:
+        pass
     log_activity("Brand deleted", name)
     return OK
 
@@ -177,11 +231,17 @@ def update_profile(brand_id: str, user_id: str, payload: dict) -> Result:
     return _mutate(brand_id, user_id, apply)
 
 
-def update_genres(brand_id: str, user_id: str, include_genres, exclude_genres) -> Result:
+def update_genres(brand_id: str, user_id: str, include_genres, exclude_genres, include_song_types=None, include_artists=None, exclude_artists=None) -> Result:
     def apply(brand: dict) -> None:
         if include_genres is not None:
             brand["include_genres"] = list(include_genres)
         if exclude_genres is not None:
             brand["exclude_genres"] = list(exclude_genres)
+        if include_song_types is not None:
+            brand["include_song_types"] = include_song_types
+        if include_artists is not None:
+            brand["include_artists"] = list(include_artists)
+        if exclude_artists is not None:
+            brand["exclude_artists"] = list(exclude_artists)
 
     return _mutate(brand_id, user_id, apply)

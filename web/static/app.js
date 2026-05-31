@@ -10,6 +10,12 @@ return {
   catalogSongs: [],
   curBrand: null,
   curPl: null,
+  curBrandPlaylists: [],
+  brandDetailLoading: false,
+  // ── Brand hover-dropdown state ─────────────
+  brandHoverDropdowns: {},    // keyed by brand id: {open,playlists,loading,loaded,rect}
+  _brandHoverTimers: {},      // open-delay timers
+  _brandLeaveTimers: {},      // close-delay timers
   brandSearch: '',
   createStep: 0,
 
@@ -40,7 +46,13 @@ return {
   sbInterval: null,
   sbCharts: {radar:null, timeline:null, radarLg:null},
   sbGenreOverrides: {include:[], exclude:[]},
+  sbSongType: 'all',
   sbShowAddGenre: false,
+  _sbGenreClickTimers: {},
+  _sbLabelClickTimers: {},
+  _stepGenreClickTimers: {},
+  _stepLabelClickTimers: {},
+  LABEL_CODES: {'Amorco': 'AMU', 'FAPLA Originals': 'FPO'},
   hasUnsavedChanges: false,
   sbAcousticDirty: false,
   sbGenreDirty: false,
@@ -77,10 +89,14 @@ return {
   approvedTracks: {},
   replacingTrack: null,
   suggestingTrack: null,
+  pendingSuggestions: null,
+  pendingSuggestionsDpIdx: null,
+  pendingSuggestionSel: {},
+  savingSuggestions: false,
   plGenreFilter: '',
   plLoading: false,
 
-  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''},
+  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:'',include_song_types:'all'},
 
   cats: [
     {v:'fashion_footwear',l:'👗 Fashion & Footwear'},
@@ -104,6 +120,8 @@ return {
   allGenres: ['Blues','Classical','Country','Electronic','Hip Hop','Jazz','Latin','Other','Pop','Reggae','Rock','Soul/Funk'],
   catalogGenres: [], // loaded from DB — falls back to allGenres if empty
   catalogGenresLoaded: false,
+  catalogArtists: [],
+  catalogArtistsLoaded: false,
 
   spParams: [
     {k:'energy_target',l:'Energy',c:'#EF4444',fmt:v=>v.toFixed(2),pct:v=>v*100},
@@ -166,16 +184,26 @@ return {
     // ── Smart routing ────────────────────────────
     if (!this.brands.length) {
       this.page = 'brand-create';
-    } else if (this.brands.some(b => (b.playlist_count||0) > 0)) {
-      // At least one generated playlist → show home grid
-      this.page = 'playlists-home';
     } else {
-      // Brands exist but none have a playlist yet → open soundboard of best candidate
-      const active = this.brands.find(b => b.sound_board_result) || this.brands[0];
-      await this.openBrand(active.id);
+      this.page = 'playlists-home';
     }
     this.loading = false;
     this.scheduleViewAnimation();
+
+    // Close all brand dropdowns when the page is scrolled
+    this.$nextTick(()=>{
+      const scrollEl=document.querySelector('.flex-1.overflow-y-auto');
+      if(scrollEl){
+        scrollEl.addEventListener('scroll',()=>{
+          let anyOpen=false;
+          Object.values(this.brandHoverDropdowns).forEach(dd=>{if(dd.open)anyOpen=true;});
+          if(anyOpen){
+            Object.keys(this.brandHoverDropdowns).forEach(id=>{this.brandHoverDropdowns[id].open=false;});
+            this.brandHoverDropdowns={...this.brandHoverDropdowns};
+          }
+        },{passive:true});
+      }
+    });
 
     // Load non-critical data in background after UI is shown
     Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres()]);
@@ -189,11 +217,8 @@ return {
         }
         this.scheduleSbChartsInit();
       }
-      if(val==='playlists' && this.curBrand && !this.curPl && !this.plLoading){
-        this.plLoading=true;
-        try{const r=await this.apiFetch('/api/playlists/'+this.curBrand.id);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
-        this.plLoading=false;
-      }
+      // playlist data is loaded explicitly by openPlaylistById — no auto-fetch here
+      // brand-detail page removed; no-op
       this.scheduleViewAnimation();
     });
     this.$watch('curBrand', () => {
@@ -231,6 +256,125 @@ return {
         this.catalogGenresLoaded=true;
       }
     }catch(e){}
+  },
+  async loadCatalogArtists(){
+    try{
+      const r=await this.apiFetch('/api/catalog/artists');
+      if(r&&r.ok){
+        const d=await r.json();
+        this.catalogArtists=(d.artists||[]).map(a=>(a||'').trim()).filter(Boolean).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+        this.catalogArtistsLoaded=true;
+      }
+    }catch(e){}
+  },
+
+  openBrandSmart(id){
+    this.openBrandDetail(id);
+  },
+
+  labelDisplay(artist){
+    const code=this.LABEL_CODES[artist];
+    return code?`${artist} (${code})`:artist;
+  },
+
+  async openBrandDetail(id){
+    // brand-detail page removed — go home instead
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    this.page='playlists-home';
+    this.scheduleViewAnimation();
+  },
+
+  async loadBrandPlaylists(id){
+    try{
+      const r=await this.apiFetch('/api/brands/'+id+'/playlists');
+      if(r&&r.ok)this.curBrandPlaylists=await r.json();
+    }catch(e){}
+  },
+
+  async openPlaylistById(playlistId){
+    this.curPl=null;
+    this.activeDp=0;
+    this.plLoading=true;
+    this.page='playlists';
+    try{const r=await this.apiFetch('/api/playlists/by-id/'+playlistId);if(r&&r.ok)this.curPl=await r.json()}catch(e){}
+    this.plLoading=false;
+    this.scheduleViewAnimation();
+  },
+
+  async generateNewPlaylist(id){
+    if(!id)return;
+    const b=this.brands.find(x=>x.id===id);
+    if(b)this.curBrand=b;
+    this.sbNeedsGeneration=false;
+    this.pendingPlaylistName='';
+    this.showNamingModal=true;
+  },
+
+  goBackToBrand(){
+    this.goHome();
+  },
+
+  // Genre state helpers for brand creation wizard (step 3)
+  genreState(g){
+    if(this.form.include_genres.includes(g))return 'include';
+    if(this.form.exclude_genres.includes(g))return 'exclude';
+    return 'neutral';
+  },
+  handleStepGenreClick(g){
+    if(!this._stepGenreClickTimers)this._stepGenreClickTimers={};
+    if(this._stepGenreClickTimers[g])return;
+    this._stepGenreClickTimers[g]=setTimeout(()=>{
+      delete this._stepGenreClickTimers[g];
+      const state=this.genreState(g);
+      if(state==='exclude'){
+        this.form.exclude_genres=this.form.exclude_genres.filter(x=>x!==g);
+      }else if(state==='include'){
+        this.form.include_genres=this.form.include_genres.filter(x=>x!==g);
+      }else{
+        this.form.include_genres=[...this.form.include_genres,g];
+      }
+    },250);
+  },
+  handleStepGenreDblClick(g){
+    if(this._stepGenreClickTimers?.[g]){clearTimeout(this._stepGenreClickTimers[g]);delete this._stepGenreClickTimers[g];}
+    const state=this.genreState(g);
+    if(state==='include'){
+      this.form.include_genres=this.form.include_genres.filter(x=>x!==g);
+      this.form.exclude_genres=[...this.form.exclude_genres,g];
+    }else if(state==='neutral'){
+      this.form.exclude_genres=[...this.form.exclude_genres,g];
+    }else{
+      // excluded → neutral on double-click
+      this.form.exclude_genres=this.form.exclude_genres.filter(x=>x!==g);
+    }
+  },
+
+  // Song type toggle helpers (form)
+  get formVocalsOn(){return this.form.include_song_types==='all'||this.form.include_song_types==='vocal';},
+  get formInstrumentalsOn(){return this.form.include_song_types==='all'||this.form.include_song_types==='instrumental';},
+  toggleFormVocals(){
+    if(this.formVocalsOn){this.form.include_song_types=this.formInstrumentalsOn?'instrumental':'all';}
+    else{this.form.include_song_types=this.formInstrumentalsOn?'all':'vocal';}
+  },
+  toggleFormInstrumentals(){
+    if(this.formInstrumentalsOn){this.form.include_song_types=this.formVocalsOn?'vocal':'all';}
+    else{this.form.include_song_types=this.formVocalsOn?'all':'instrumental';}
+  },
+
+  // Song type toggle helpers (soundboard)
+  get sbVocalsOn(){return this.sbSongType==='all'||this.sbSongType==='vocal';},
+  get sbInstrumentalsOn(){return this.sbSongType==='all'||this.sbSongType==='instrumental';},
+  get sbSongTypeLabel(){if(this.sbSongType==='all')return 'Mixed';if(this.sbSongType==='vocal')return 'Vocals Only';return 'Instrumentals Only';},
+  toggleSbVocals(){
+    if(this.sbVocalsOn){this.sbSongType=this.sbInstrumentalsOn?'instrumental':'all';}
+    else{this.sbSongType=this.sbInstrumentalsOn?'all':'vocal';}
+    this.sbGenreDirty=true;
+  },
+  toggleSbInstrumentals(){
+    if(this.sbInstrumentalsOn){this.sbSongType=this.sbVocalsOn?'vocal':'all';}
+    else{this.sbSongType=this.sbVocalsOn?'all':'instrumental';}
+    this.sbGenreDirty=true;
   },
   async loadCatalog(){
     try{
@@ -349,8 +493,14 @@ return {
       if(!this.form.visitor_activity.length)this.form.visitor_activity=[...this.suggestions.activities];
       if(!this.form.customer_types.length)this.form.customer_types=[...this.suggestions.customer_types];
       if(!this.form.lifestyle_tags.length)this.form.lifestyle_tags=[...this.suggestions.lifestyle];
-      // Ensure DB-backed genres are ready by the time user reaches the genre step.
+      // If website was scraped, apply music recs and store asset analysis
+      if(s.asset_analysis&&!this.assetAnalysis)this.assetAnalysis=s.asset_analysis;
       if(!this.catalogGenresLoaded) await this.loadCatalogGenres();
+      if(!this.catalogArtistsLoaded) this.loadCatalogArtists();
+      const knownGenres=this.genres;const knownLower=knownGenres.map(g=>g.toLowerCase());
+      if(s.recommended_genres?.length){s.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
+      if(s.avoid_genres?.length){s.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
+      if(s.music_notes&&!this.form.music_notes)this.form.music_notes=s.music_notes;
       this.createStep++;
     }catch(e){
       alert('Could not analyze brand details right now. Please try again.');
@@ -390,6 +540,13 @@ return {
 
   toggleGenre(field,genre,target){const arr=target[field];const idx=arr.indexOf(genre);if(idx>=0)arr.splice(idx,1);else arr.push(genre)},
   toggleChip(arr,v){const i=arr.indexOf(v);if(i>=0)arr.splice(i,1);else arr.push(v)},
+  toggleArtist(field, artist){
+    const other=field==='include_artists'?'exclude_artists':'include_artists';
+    this.form[other]=this.form[other].filter(a=>a!==artist);
+    const arr=this.form[field];
+    const idx=arr.indexOf(artist);
+    if(idx>=0)arr.splice(idx,1);else arr.push(artist);
+  },
 
   async submitBrand(){
     this.submitting=true;
@@ -406,6 +563,7 @@ return {
       }
       await this.loadBrands();
       this.curBrand=brand;this.curPl=null;this._origRanges={};this._origTargets={};
+      this.sbSongType=brand.include_song_types||'all';
       this._resetForm();
       this.page='soundboard';
       this.generateSoundboard(brand.id);
@@ -415,7 +573,7 @@ return {
 
   _resetForm(){
     this.createStep=0;
-    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:''};
+    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:'',include_song_types:'all'};
     this.suggestions={activities:[],lifestyle:[],customer_types:[]};
     this.uploadedFiles=[];
     this.assetAnalysis='';
@@ -441,10 +599,12 @@ return {
 
   _pollSb(taskId,brandId){
     if(this.sbInterval)clearInterval(this.sbInterval);
+    let misses=0;
     this.sbInterval=setInterval(async()=>{
       try{
         const r=await this.apiFetch('/api/generate/status/'+taskId);
         if(r&&r.ok){
+          misses=0;
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
@@ -457,10 +617,12 @@ return {
               this.showGen=false;
               this.scheduleSbChartsInit();
             } else {
-              this.showGen=false;
+              // Keep modal open so user can see and dismiss the error
               this.scheduleSbChartsInit();
             }
           }
+        } else if(r&&r.status===404){
+          if(++misses>=5){clearInterval(this.sbInterval);this.sbInterval=null;this.genTask={status:'error',error:'Task not found — server may have restarted',progress:0,log:[]};this.showGen=false;}
         }
       }catch(e){}
     },1000);
@@ -528,13 +690,9 @@ return {
     const b=this.brands.find(x=>x.id===id);
     if(b)this.curBrand=b;
     this.sbNeedsGeneration=false;
-    // First generation — prompt for a playlist name first
-    if((this.curBrand?.playlist_count||0)===0){
-      this.pendingPlaylistName=this.curBrand?.brand_name||'';
-      this.showNamingModal=true;
-      return;
-    }
-    await this._startGenerate(id,null);
+    // Always prompt for a playlist name
+    this.pendingPlaylistName=this.curBrand?.brand_name||'';
+    this.showNamingModal=true;
   },
 
   async _startGenerate(id,playlistName){
@@ -562,7 +720,7 @@ return {
     this._startGenerate(id,name);
   },
 
-  // ── Playlist home navigation ───────────────
+  // ── Brands / home navigation ─────────────
   goHome(){ this.page='playlists-home'; },
 
   async openPlaylist(id){
@@ -581,6 +739,7 @@ return {
     if(!this.curBrand)return;
     const saved=localStorage.getItem('sbGenreOverrides_'+this.curBrand.id);
     this.sbGenreOverrides=saved?JSON.parse(saved):{include:[],exclude:[]};
+    this.sbSongType=this.curBrand.include_song_types||'all';
     this._origTargets={};this._origRanges={};
     this.hasUnsavedChanges=false;this.sbAcousticDirty=false;this.sbGenreDirty=false;
     this.sbTimelineDirty=false;this.sbProfileDirty=false;this.profileDirty=false;
@@ -606,10 +765,12 @@ return {
 
   _pollGen(taskId,brandId){
     if(this.genInterval)clearInterval(this.genInterval);
+    let misses=0;
     this.genInterval=setInterval(async()=>{
       try{
         const r=await this.apiFetch('/api/generate/status/'+taskId);
         if(r&&r.ok){
+          misses=0;
           this.genTask=await r.json();
           this.$nextTick(()=>{const el=document.getElementById('gen-log');if(el)el.scrollTop=el.scrollHeight});
           if(this.genTask.status==='done'||this.genTask.status==='error'){
@@ -621,18 +782,18 @@ return {
                 this.genTask.log=[...(this.genTask.log||[]),'Finalizing playlists...'];
                 await new Promise(res=>setTimeout(res,450));
               }
-              // Fetch playlist before navigating so tracks are ready on arrival
-              this.plLoading=true;
-              if(brandId){try{const pr=await this.apiFetch('/api/playlists/'+brandId);if(pr&&pr.ok)this.curPl=await pr.json()}catch(e){}}
-              this.plLoading=false;
+              await this.loadBrands();
+              if(brandId){const b=this.brands.find(x=>x.id===brandId);if(b)this.curBrand=b;}
+              this.invalidateBrandPlaylistCache(brandId);
               this.showGen=false;
               this.genTask=null;
-              this.page='playlists';
-              this.scheduleSbChartsInit();
+              await this.openPlaylist(brandId);
               // Refresh sidebar data in background (non-blocking)
-              Promise.all([this.loadBrands(),this.loadStats(),this.loadActivity()]);
+              Promise.all([this.loadStats(),this.loadActivity()]);
             }
           }
+        } else if(r&&r.status===404){
+          if(++misses>=5){clearInterval(this.genInterval);this.genInterval=null;this.genTask={status:'error',error:'Task not found — server may have restarted',progress:0,log:[]};this.showGen=false;}
         }
       }catch(e){}
     },1500);
@@ -795,7 +956,7 @@ return {
     const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
     const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
     try{
-      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc})});
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,include_song_types:this.sbSongType,include_artists:this.curBrand?.include_artists||[],exclude_artists:this.curBrand?.exclude_artists||[]})});
       await this.loadBrands();
       const latest=this.brands.find(x=>x.id===this.curBrand.id);
       if(latest)this.curBrand=latest;
@@ -888,20 +1049,96 @@ return {
     const norm=x=>{const i=lower.indexOf((x||'').toLowerCase());return i>=0?canonical[i]:x};
     return(this.curBrand?.exclude_genres||[]).map(norm).includes(g)||this.sbGenreOverrides.exclude.includes(g);
   },
-  toggleSbGenre(g){
+  handleSbGenreClick(g){
+    if(!this._sbGenreClickTimers)this._sbGenreClickTimers={};
+    if(this._sbGenreClickTimers[g])return;
+    this._sbGenreClickTimers[g]=setTimeout(()=>{
+      delete this._sbGenreClickTimers[g];
+      this.sbGenreDirty=true;
+      if(this.sbExcluded(g)){
+        this.sbGenreOverrides.exclude=this.sbGenreOverrides.exclude.filter(x=>x!==g);
+      }else if(this.sbIncluded(g)){
+        this.sbGenreOverrides.include=this.sbGenreOverrides.include.filter(x=>x!==g);
+      }else{
+        this.sbGenreOverrides.include=[...this.sbGenreOverrides.include,g];
+      }
+      this._saveGenreOverrides();
+    },250);
+  },
+  handleSbGenreDblClick(g){
+    if(this._sbGenreClickTimers?.[g]){clearTimeout(this._sbGenreClickTimers[g]);delete this._sbGenreClickTimers[g];}
     this.sbGenreDirty=true;
-    const inc=this.sbGenreOverrides.include;const exc=this.sbGenreOverrides.exclude;
-    // cycle: excluded → neutral, included → excluded, neutral → included
-    if(this.sbExcluded(g)){
-      this.sbGenreOverrides.exclude=exc.filter(x=>x!==g);
-      this._saveGenreOverrides();return;
-    }
     if(this.sbIncluded(g)){
-      this.sbGenreOverrides.include=inc.filter(x=>x!==g);
-      this.sbGenreOverrides.exclude=[...exc,g];
-      this._saveGenreOverrides();return;
+      this.sbGenreOverrides.include=this.sbGenreOverrides.include.filter(x=>x!==g);
+      this.sbGenreOverrides.exclude=[...this.sbGenreOverrides.exclude,g];
+    }else if(!this.sbExcluded(g)){
+      this.sbGenreOverrides.exclude=[...this.sbGenreOverrides.exclude,g];
+    }else{
+      this.sbGenreOverrides.exclude=this.sbGenreOverrides.exclude.filter(x=>x!==g);
     }
-    this.sbGenreOverrides.include=[...inc,g];this._saveGenreOverrides();
+    this._saveGenreOverrides();
+  },
+
+  // ── Label (AMU/FPO) state — soundboard ────────
+  sbLabelIncluded(a){return(this.curBrand?.include_artists||[]).map(x=>x.toLowerCase()).includes(a.toLowerCase());},
+  sbLabelExcluded(a){return(this.curBrand?.exclude_artists||[]).map(x=>x.toLowerCase()).includes(a.toLowerCase());},
+  handleSbLabelClick(a){
+    if(this._sbLabelClickTimers[a])return;
+    this._sbLabelClickTimers[a]=setTimeout(()=>{
+      delete this._sbLabelClickTimers[a];
+      this.sbGenreDirty=true;
+      if(this.sbLabelExcluded(a)){
+        if(this.curBrand)this.curBrand.exclude_artists=(this.curBrand.exclude_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
+      }else if(this.sbLabelIncluded(a)){
+        if(this.curBrand)this.curBrand.include_artists=(this.curBrand.include_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
+      }else{
+        if(this.curBrand){if(!this.curBrand.include_artists)this.curBrand.include_artists=[];this.curBrand.include_artists=[...this.curBrand.include_artists,a];}
+      }
+    },250);
+  },
+  handleSbLabelDblClick(a){
+    if(this._sbLabelClickTimers[a]){clearTimeout(this._sbLabelClickTimers[a]);delete this._sbLabelClickTimers[a];}
+    this.sbGenreDirty=true;
+    if(!this.curBrand)return;
+    if(this.sbLabelIncluded(a)){
+      this.curBrand.include_artists=(this.curBrand.include_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
+      if(!this.curBrand.exclude_artists)this.curBrand.exclude_artists=[];
+      this.curBrand.exclude_artists=[...this.curBrand.exclude_artists,a];
+    }else if(!this.sbLabelExcluded(a)){
+      if(!this.curBrand.exclude_artists)this.curBrand.exclude_artists=[];
+      this.curBrand.exclude_artists=[...this.curBrand.exclude_artists,a];
+    }else{
+      this.curBrand.exclude_artists=(this.curBrand.exclude_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
+    }
+  },
+
+  // ── Label state — brand creation wizard ────────
+  labelState(a){
+    if(this.form.include_artists.includes(a))return 'include';
+    if(this.form.exclude_artists.includes(a))return 'exclude';
+    return 'neutral';
+  },
+  handleStepLabelClick(a){
+    if(this._stepLabelClickTimers[a])return;
+    this._stepLabelClickTimers[a]=setTimeout(()=>{
+      delete this._stepLabelClickTimers[a];
+      const state=this.labelState(a);
+      if(state==='exclude'){this.form.exclude_artists=this.form.exclude_artists.filter(x=>x!==a);}
+      else if(state==='include'){this.form.include_artists=this.form.include_artists.filter(x=>x!==a);}
+      else{this.form.include_artists=[...this.form.include_artists,a];}
+    },250);
+  },
+  handleStepLabelDblClick(a){
+    if(this._stepLabelClickTimers[a]){clearTimeout(this._stepLabelClickTimers[a]);delete this._stepLabelClickTimers[a];}
+    const state=this.labelState(a);
+    if(state==='include'){
+      this.form.include_artists=this.form.include_artists.filter(x=>x!==a);
+      this.form.exclude_artists=[...this.form.exclude_artists,a];
+    }else if(state==='neutral'){
+      this.form.exclude_artists=[...this.form.exclude_artists,a];
+    }else{
+      this.form.exclude_artists=this.form.exclude_artists.filter(x=>x!==a);
+    }
   },
 
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
@@ -1342,18 +1579,108 @@ return {
     const key=dpIdx+'-'+ti;
     this.suggestingTrack=key;
     try{
-      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks/suggest',{method:'POST',body:JSON.stringify({day_part_index:dpIdx,song_id:songId,top_k:8})});
+      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks/suggest',{method:'POST',body:JSON.stringify({day_part_index:dpIdx,song_id:songId,top_k:8,playlist_id:this.curPl?.playlist_id||''})});
       if(!r||!r.ok){const e=await r?.json().catch(()=>({}));throw new Error(e.error||'Suggest failed')}
       const data=await r.json();
-      this.curPl.day_parts[dpIdx]=data.day_part;
+      this.pendingSuggestions=data.suggestions||[];
+      this.pendingSuggestionsDpIdx=dpIdx;
+      const sel={};
+      (data.suggestions||[]).forEach(s=>{sel[s.song_id]=true;});
+      this.pendingSuggestionSel=sel;
     }catch(e){alert('Could not find similar songs: '+(e.message||'Please try again.'))}
     finally{this.suggestingTrack=null}
+  },
+  async saveSuggestions(){
+    const selectedIds=Object.entries(this.pendingSuggestionSel).filter(([,v])=>v).map(([k])=>k);
+    if(!selectedIds.length){this.dismissSuggestions();return;}
+    this.savingSuggestions=true;
+    try{
+      const r=await this.apiFetch('/api/playlists/'+this.curBrand.id+'/tracks/suggest/save',{method:'POST',body:JSON.stringify({day_part_index:this.pendingSuggestionsDpIdx,song_ids:selectedIds,playlist_id:this.curPl?.playlist_id||''})});
+      if(!r||!r.ok){const e=await r?.json().catch(()=>({}));throw new Error(e.error||'Save failed')}
+      const data=await r.json();
+      this.curPl.day_parts[this.pendingSuggestionsDpIdx]=data.day_part;
+      this.dismissSuggestions();
+    }catch(e){alert('Could not save songs: '+(e.message||'Please try again.'))}
+    finally{this.savingSuggestions=false;}
+  },
+  dismissSuggestions(){
+    this.pendingSuggestions=null;
+    this.pendingSuggestionsDpIdx=null;
+    this.pendingSuggestionSel={};
   },
   nextTrack(){if(!this.npQueue.length)return;let n=this.npQueueIdx+1;while(n<this.npQueue.length&&!this.npQueue[n].src)n++;if(n<this.npQueue.length){this.npQueueIdx=n;const t=this.npQueue[n];this._loadAndPlay(t,t._ti,t._dpIdx)}},
   prevTrack(){if(!this.npQueue.length)return;let p=this.npQueueIdx-1;while(p>=0&&!this.npQueue[p].src)p--;if(p>=0){this.npQueueIdx=p;const t=this.npQueue[p];this._loadAndPlay(t,t._ti,t._dpIdx)}},
   seekTo(v){if(this.player)this.player.currentTime=+v},
   setVolume(v){if(this.player)this.player.volume=+v},
   fmtTime(s){if(!s||isNaN(s))return'0:00';const m=Math.floor(s/60),sec=Math.floor(s%60);return m+':'+(sec<10?'0':'')+sec},
+
+  // ── Export ──────────────────────────────────
+  async exportPlaylistPDF(brand) {
+    const r = await this.apiFetch('/api/playlists/' + brand.id);
+    if (!r || !r.ok) { alert('Could not load playlist'); return; }
+    const pl = await r.json();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const playlistName = brand.playlist_name || brand.brand_name || 'Playlist';
+    const colId = 14, colName = 64, rowH = 7;
+    let y = 18;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(playlistName, colId, y); y += 8;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(130);
+    doc.text('Generated by fabPLAY  •  ' + new Date().toLocaleDateString(), colId, y); y += 10;
+    doc.setTextColor(0);
+
+    (pl.day_parts || []).forEach(dp => {
+      const dpLabel = dp.name || dp.start_time || 'Day Part';
+      const dpTime = dp.start_time && dp.end_time ? '  (' + dp.start_time + ' – ' + dp.end_time + ')' : '';
+      const tracks = dp.tracks || [];
+
+      if (y > 265) { doc.addPage(); y = 14; }
+
+      // Day-part header band
+      doc.setFillColor(30, 30, 30);
+      doc.rect(colId - 2, y - 5, 186, rowH + 1, 'F');
+      doc.setTextColor(255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(dpLabel + dpTime + '  —  ' + tracks.length + ' tracks', colId, y);
+      doc.setTextColor(0);
+      y += rowH + 2;
+
+      if (y > 265) { doc.addPage(); y = 14; }
+
+      // Column headers
+      doc.setFillColor(235, 235, 235);
+      doc.rect(colId - 2, y - 5, 186, rowH, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      doc.text('Song ID', colId, y);
+      doc.text('Song Name', colName, y);
+      doc.setTextColor(0);
+      y += rowH;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      tracks.forEach((t, i) => {
+        if (y > 280) { doc.addPage(); y = 14; }
+        if (i % 2 === 0) { doc.setFillColor(249, 249, 249); doc.rect(colId - 2, y - 5, 186, rowH, 'F'); }
+        doc.text(String(t.song_id || ''), colId, y);
+        const nameStr = String(t.title || t.song_name || '');
+        const clipped = doc.getTextWidth(nameStr) > 128 ? doc.splitTextToSize(nameStr, 128)[0] + '…' : nameStr;
+        doc.text(clipped, colName, y);
+        y += rowH;
+      });
+
+      y += 5;
+    });
+
+    doc.save(playlistName.replace(/[^a-z0-9]/gi, '_') + '_playlist.pdf');
+  },
 
   // ── Auth helpers ────────────────────────────
   authToken() { return localStorage.getItem('fabplay_token') || ''; },
@@ -1396,6 +1723,93 @@ return {
       });
       await this.loadIamUsers();
     } catch(e) { alert('Failed to update role. Please try again.'); }
+  },
+
+  // ── Brand hover-dropdown ───────────────────
+  _ensureBrandDropdown(id){
+    if(!this.brandHoverDropdowns[id]){
+      this.brandHoverDropdowns={...this.brandHoverDropdowns,[id]:{open:false,playlists:[],loading:false,loaded:false}};
+    }
+  },
+
+  onBrandCardMouseenter(id){
+    this._ensureBrandDropdown(id);
+    // Cancel any pending close timer
+    if(this._brandLeaveTimers[id]){clearTimeout(this._brandLeaveTimers[id]);delete this._brandLeaveTimers[id];}
+    // If already open, nothing to do
+    if(this.brandHoverDropdowns[id].open)return;
+    // Open after 180ms
+    if(!this._brandHoverTimers[id]){
+      this._brandHoverTimers[id]=setTimeout(()=>{
+        delete this._brandHoverTimers[id];
+        this.brandHoverDropdowns[id].open=true;
+        this.brandHoverDropdowns={...this.brandHoverDropdowns};
+        if(!this.brandHoverDropdowns[id].loaded)this._fetchBrandDropdownPlaylists(id);
+      },180);
+    }
+  },
+
+  onBrandCardMouseleave(id){
+    // Cancel any pending open timer
+    if(this._brandHoverTimers[id]){clearTimeout(this._brandHoverTimers[id]);delete this._brandHoverTimers[id];}
+    // Delay close by 200ms so mouse can move into the dropdown
+    if(!this._brandLeaveTimers[id]){
+      this._brandLeaveTimers[id]=setTimeout(()=>{
+        delete this._brandLeaveTimers[id];
+        if(this.brandHoverDropdowns[id]){
+          this.brandHoverDropdowns[id].open=false;
+          this.brandHoverDropdowns={...this.brandHoverDropdowns};
+        }
+      },200);
+    }
+  },
+
+  async _fetchBrandDropdownPlaylists(id){
+    const dd=this.brandHoverDropdowns[id];
+    if(!dd||dd.loading)return;
+    dd.loading=true;
+    this.brandHoverDropdowns={...this.brandHoverDropdowns};
+    try{
+      const r=await this.apiFetch('/api/brands/'+id+'/playlists');
+      if(r&&r.ok){
+        dd.playlists=await r.json();
+        dd.loaded=true;
+      }else{dd.playlists=[];dd.loaded=true;}
+    }catch(e){dd.playlists=[];dd.loaded=true;}
+    dd.loading=false;
+    this.brandHoverDropdowns={...this.brandHoverDropdowns};
+  },
+
+  invalidateBrandPlaylistCache(id){
+    if(id&&this.brandHoverDropdowns[id]){
+      this.brandHoverDropdowns[id].loaded=false;
+      this.brandHoverDropdowns[id].playlists=[];
+      this.brandHoverDropdowns={...this.brandHoverDropdowns};
+    }
+  },
+
+  openPlaylistFromDropdown(brandId,playlistId){
+    if(this.brandHoverDropdowns[brandId]){
+      this.brandHoverDropdowns[brandId].open=false;
+      this.brandHoverDropdowns={...this.brandHoverDropdowns};
+    }
+    const b=this.brands.find(x=>x.id===brandId);
+    if(b)this.curBrand=b;
+    this.openPlaylistById(playlistId);
+  },
+
+  openSoundboardFromDropdown(brandId){
+    if(this.brandHoverDropdowns[brandId]){
+      this.brandHoverDropdowns[brandId].open=false;
+      this.brandHoverDropdowns={...this.brandHoverDropdowns};
+    }
+    const b=this.brands.find(x=>x.id===brandId);
+    if(b){
+      this.curBrand=b;
+      this.goToSoundboard();
+    } else {
+      this.openBrand(brandId);
+    }
   },
 
   // ── UI helpers ─────────────────────────────

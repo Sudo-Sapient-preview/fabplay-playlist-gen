@@ -65,6 +65,8 @@ urlpatterns = [
         generation_views.generation_status_view,
         name="api-generation-status",
     ),
+    path("brands/<str:brand_id>/playlists", playlist_views.list_brand_playlists_view, name="api-brand-playlists-list"),
+    path("playlists/by-id/<str:playlist_id>", playlist_views.get_playlist_by_id_view, name="api-playlist-get-by-id"),
     path("playlists/<str:brand_id>", playlist_views.get_playlist_view, name="api-playlist-get"),
     path(
         "playlists/<str:brand_id>/tracks",
@@ -81,7 +83,13 @@ urlpatterns = [
         playlist_views.suggest_tracks_view,
         name="api-playlist-suggest-tracks",
     ),
+    path(
+        "playlists/<str:brand_id>/tracks/suggest/save",
+        playlist_views.add_suggested_tracks_view,
+        name="api-playlist-add-suggested-tracks",
+    ),
     path("catalog/genres", catalog_views.genres, name="api-catalog-genres"),
+    path("catalog/artists", catalog_views.artists, name="api-catalog-artists"),
     path("catalog/stats", catalog_views.stats, name="api-catalog-stats"),
     path("catalog/songs", catalog_views.songs, name="api-catalog-songs"),
     path("debug/search", iam_views.debug_search, name="api-debug-search"),

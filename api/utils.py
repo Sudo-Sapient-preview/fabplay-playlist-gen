@@ -54,6 +54,7 @@ def fmt_track(track: dict) -> dict:
         "title": track.get("title", ""),
         "artist": track.get("artist", ""),
         "genre": track.get("genre", ""),
+        "song_type": track.get("song_type", ""),
         "url": track.get("url", ""),
         "src": track.get("url") or track.get("src", ""),
         "bpm": round(float(track.get("tempo_bpm", 120))),
@@ -154,4 +155,5 @@ def pipeline_inputs(brand: dict) -> dict:
         "music_notes": brand.get("music_notes", ""),
         "asset_analysis": brand.get("asset_analysis", ""),
         "has_brand_guidelines": brand.get("has_brand_guidelines", False),
+        "include_song_types": brand.get("include_song_types", "all"),
     }
