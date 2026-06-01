@@ -518,28 +518,28 @@
         <template x-for="p in sbAudioParams()" :key="p.label">
           <div class="audio-param-row">
             <div class="audio-param-header">
-              <span class="audio-param-label" x-text="p.left + ' → ' + p.right"></span>
+              <span class="audio-param-label" x-text="p.isSongType ? 'Song Type' : p.left + ' → ' + p.right"></span>
               <div class="audio-param-value-group">
                 <span class="audio-param-value" x-text="p.display"></span>
                 <button class="audio-param-reset" @click="resetTarget(p)" title="Reset to AI suggestion">↻</button>
               </div>
             </div>
             <div class="slider-track">
-              <!-- Pink AI-suggested range band: from min to max -->
               <div class="slider-range"
                 :style="p.key==='tempo'
                   ? `left:${((p.min-60)/120)*100}%;width:${((p.max-p.min)/120)*100}%`
                   : `left:${p.min*100}%;width:${(p.max-p.min)*100}%`">
               </div>
-              <!-- Red fill bar from 0 to target -->
               <div class="slider-fill" :style="'width:'+p.pct+'%'"></div>
-              <!-- Draggable range input -->
               <input type="range" class="slider-input"
                 :min="p.key==='tempo'?60:0"
                 :max="p.key==='tempo'?180:1"
                 :step="p.key==='tempo'?1:0.01"
                 :value="p.target"
                 @input="updateTarget(p,$event.target.value)">
+            </div>
+            <div x-show="p.isSongType" class="song-type-labels">
+              <span>Instrumental</span><span>Mixed</span><span>Vocal</span>
             </div>
           </div>
         </template>

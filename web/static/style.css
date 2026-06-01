@@ -209,6 +209,8 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 .audio-param-value{font-size:.78rem;font-weight:700;color:#1D4ED8;min-width:38px;text-align:right}
 .audio-param-reset{background:transparent;border:none;cursor:pointer;color:#BBBBBB;padding:0 1px;font-size:.85rem;line-height:1;transition:color .15s;font-family:inherit}
 .audio-param-reset:hover{color:var(--red)}
+.song-type-labels{display:flex;justify-content:space-between;margin-top:-8px;padding:0 2px}
+.song-type-labels span{font-size:.68rem;color:var(--faint)}
 
 /* Grey base track */
 .slider-track{position:relative;height:8px;background:#EBEBEB;border-radius:4px;overflow:visible;margin:3px 0 12px}
@@ -223,9 +225,9 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 .slider-input::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--red);border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.30);cursor:pointer}
 
 /* ── Day-part tabs ── */
-.dp-tab{padding:8px 16px;border-radius:8px;font-size:.78rem;font-weight:500;cursor:pointer;transition:all .15s;color:var(--muted);background:transparent;border:none;white-space:nowrap;font-family:inherit}
+.dp-tab{padding:7px 16px;border-radius:20px;font-size:.78rem;font-weight:500;cursor:pointer;transition:all .15s;color:var(--txt);background:transparent;border:none;white-space:nowrap;font-family:inherit}
 .dp-tab.on{background:var(--red);color:#fff}
-.dp-tab:not(.on):hover{background:#ECE7DC;color:var(--txt)}
+.dp-tab:not(.on):hover{background:#ECE7DC}
 
 /* ── Track rows ── */
 .tr{display:grid;align-items:center;gap:10px;padding:9px 18px;font-size:.79rem;border-bottom:1px solid #ECE7DC;transition:background .1s;cursor:pointer}

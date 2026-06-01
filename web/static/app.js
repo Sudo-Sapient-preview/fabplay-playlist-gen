@@ -812,19 +812,18 @@ return {
   // ── Sound board review helpers ─────────────
   sbAudioParams(){
     void this.sbVersion; // reactive dependency so dragging timeline re-runs this
-    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
     const dp0=this.curBrand?.sound_board_result?.day_parts?.[this.activeDp]
              ||this.curPl?.day_parts?.[this.activeDp]
              ||this.curBrand?.sound_board_result?.day_parts?.[0]
              ||this.curPl?.day_parts?.[0]||{};
-    const e=sb.energy_target??dp0.energy_target??0.5;
-    const v=sb.valence_target??dp0.valence_target??0.5;
-    const t=sb.tempo_target??dp0.tempo_target??110;
-    const d=sb.danceability_target??dp0.danceability_target??0.5;
-    const a=sb.acousticness_target??dp0.acousticness_target??0.4;
-    const ins=sb.instrumentalness_target??dp0.instrumentalness_target??0.4;
-    const l=sb.loudness_target??dp0.loudness_target??0.5;
-    const s=sb.speechiness_target??dp0.speechiness_target??0.2;
+    const e=dp0.energy_target??0.5;
+    const v=dp0.valence_target??0.5;
+    const t=dp0.tempo_target??110;
+    const d=dp0.danceability_target??0.5;
+    const a=dp0.acousticness_target??0.4;
+    const ins=dp0.instrumentalness_target??0.4;
+    const l=dp0.loudness_target??0.5;
+    const s=dp0.speechiness_target??0.2;
 
     // Clamp a value between lo and hi
     const clamp=(x,lo,hi)=>Math.min(hi,Math.max(lo,x));
@@ -853,15 +852,22 @@ return {
       if(this._origTargets[k]===undefined)this._origTargets[k]=targetVal;
       return item;
     };
+    // Song Type: vocalness = 1 − instrumentalness (Instrumental=0, Vocal=1)
+    const stVal = dp0.instrumentalness_target!=null ? 1-dp0.instrumentalness_target : 1-ins;
+    const stDisplay = stVal<0.33?'Instrumental':stVal>0.67?'Vocal':'Mixed';
+    if(this._origTargets['songtype']===undefined)this._origTargets['songtype']=stVal;
+    const stItem={key:'songtype',label:'songtype',left:'Instrumental',right:'Vocal',
+                  isSongType:true,target:stVal,pct:stVal*100,display:stDisplay,min:0,max:1};
+
     return[
       mk('energy','Calm','Energetic',e,dp0.energy_min,dp0.energy_max,dp0.energy_target),
       mk('valence','Melancholic','Cheerful',v,dp0.valence_min,dp0.valence_max,dp0.valence_target),
       mk('tempo','Slow (60)','Fast (180)',t,dp0.tempo_min,dp0.tempo_max,dp0.tempo_target),
       mk('danceability','Free-form','Groovy',d,dp0.danceability_min,dp0.danceability_max,dp0.danceability_target),
       mk('acousticness','Electronic','Acoustic',a,dp0.acousticness_min,dp0.acousticness_max,dp0.acousticness_target),
-      mk('instrumentalness','Vocal','Instrumental',ins,dp0.instrumentalness_min,dp0.instrumentalness_max,dp0.instrumentalness_target),
       mk('loudness','Quiet','Loud',l,dp0.loudness_min,dp0.loudness_max,dp0.loudness_target),
       mk('speechiness','No Speech','Spoken Word',s,dp0.speechiness_min,dp0.speechiness_max,dp0.speechiness_target),
+      stItem,
     ];
   },
 
@@ -878,12 +884,16 @@ return {
       this._pendingVals={};
       this._sliderRaf=null;
       const sb=this.curBrand?.sound_board_result;
+      const activeDpIdx=this.activeDp;
       pending.forEach(({p:_p,val:_val})=>{
         if(sb){
-          if(!sb.sound_board)sb.sound_board={};
-          sb.sound_board[_p.key+'_target']=_val;
-          // Apply to ALL day parts so every time-slot uses the new target during generation
-          sb.day_parts?.forEach(dp=>{dp[_p.key+'_target']=_val;});
+          // Only update the active day part — each day part has independent acoustic controls
+          const dp=sb.day_parts?.[activeDpIdx];
+          if(dp){
+            // songtype uses vocalness (1−instrumentalness) for display; invert when storing
+            if(_p.key==='songtype') dp.instrumentalness_target=1-_val;
+            else dp[_p.key+'_target']=_val;
+          }
         }
         _p.target=_val;
         _p.pct=_p.key==='tempo'?((_val-60)/120)*100:_val*100;
@@ -916,15 +926,17 @@ return {
   },
 
   resetAllAcousticTargets(){
-    const keys=['energy','valence','tempo','danceability','acousticness','instrumentalness','loudness','speechiness'];
+    const keys=['energy','valence','tempo','danceability','acousticness','loudness','speechiness','songtype'];
     const sb=this.curBrand?.sound_board_result;
     if(!sb)return;
+    const activeDp=sb.day_parts?.[this.activeDp];
     keys.forEach(k=>{
       const orig=this._origTargets[k];
       if(orig===undefined)return;
-      if(!sb.sound_board)sb.sound_board={};
-      sb.sound_board[k+'_target']=orig;
-      sb.day_parts?.forEach(dp=>{dp[k+'_target']=orig});
+      if(activeDp){
+        if(k==='songtype') activeDp.instrumentalness_target=1-orig;
+        else activeDp[k+'_target']=orig;
+      }
     });
     this.sbAcousticDirty=false;
     this._refreshTimeline();
@@ -933,13 +945,8 @@ return {
 
   async saveAcousticChanges(){
     if(!this.curBrand?.id||!this.curBrand?.sound_board_result)return;
-    const sb=this.curBrand.sound_board_result.sound_board||{};
-    const keys=['energy_target','valence_target','tempo_target','danceability_target','acousticness_target','instrumentalness_target','loudness_target','speechiness_target'];
-    const targets={};keys.forEach(k=>{if(sb[k]!==undefined)targets[k]=sb[k]});
     const dps=this.curBrand.sound_board_result.day_parts;
     try{
-      if(Object.keys(targets).length)
-        await this.apiFetch('/api/brands/'+this.curBrand.id+'/soundboard',{method:'PUT',body:JSON.stringify({targets})});
       if(dps?.length){
         const payload=dps.map(dp=>({energy_target:dp.energy_target,valence_target:dp.valence_target,tempo_target:dp.tempo_target,danceability_target:dp.danceability_target,acousticness_target:dp.acousticness_target,instrumentalness_target:dp.instrumentalness_target,loudness_target:dp.loudness_target,speechiness_target:dp.speechiness_target}));
         await this.apiFetch('/api/brands/'+this.curBrand.id+'/dayparts',{method:'PUT',body:JSON.stringify({day_parts:payload})});
