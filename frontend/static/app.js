@@ -925,19 +925,18 @@ return {
   // ── Sound board review helpers ─────────────
   sbAudioParams(){
     void this.sbVersion; // reactive dependency so dragging timeline re-runs this
-    const sb=this.curBrand?.sound_board_result?.sound_board||this.curPl?.sound_board||{};
     const dp0=this.curBrand?.sound_board_result?.day_parts?.[this.activeDp]
              ||this.curPl?.day_parts?.[this.activeDp]
              ||this.curBrand?.sound_board_result?.day_parts?.[0]
              ||this.curPl?.day_parts?.[0]||{};
-    const e=sb.energy_target??dp0.energy_target??0.5;
-    const v=sb.valence_target??dp0.valence_target??0.5;
-    const t=sb.tempo_target??dp0.tempo_target??110;
-    const d=sb.danceability_target??dp0.danceability_target??0.5;
-    const a=sb.acousticness_target??dp0.acousticness_target??0.4;
-    const ins=sb.instrumentalness_target??dp0.instrumentalness_target??0.4;
-    const l=sb.loudness_target??dp0.loudness_target??0.5;
-    const s=sb.speechiness_target??dp0.speechiness_target??0.2;
+    const e=dp0.energy_target??0.5;
+    const v=dp0.valence_target??0.5;
+    const t=dp0.tempo_target??110;
+    const d=dp0.danceability_target??0.5;
+    const a=dp0.acousticness_target??0.4;
+    const ins=dp0.instrumentalness_target??0.4;
+    const l=dp0.loudness_target??0.5;
+    const s=dp0.speechiness_target??0.2;
 
     // Clamp a value between lo and hi
     const clamp=(x,lo,hi)=>Math.min(hi,Math.max(lo,x));
@@ -992,11 +991,7 @@ return {
       const sb=this.curBrand?.sound_board_result;
       const activeDp=sb?.day_parts?.[this.activeDp];
       pending.forEach(({p:_p,val:_val})=>{
-        if(sb){
-          if(!sb.sound_board)sb.sound_board={};
-          sb.sound_board[_p.key+'_target']=_val;
-          if(activeDp)activeDp[_p.key+'_target']=_val;
-        }
+        if(activeDp)activeDp[_p.key+'_target']=_val;
         _p.target=_val;
         _p.pct=_p.key==='tempo'?((_val-60)/120)*100:_val*100;
         _p.display=_p.key==='tempo'?Math.round(_val)+' BPM':parseFloat(_val).toFixed(2);
