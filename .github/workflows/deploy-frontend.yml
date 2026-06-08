@@ -1,0 +1,37 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [fabplay-v1]
+    paths:
+      - 'frontend/**'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deployment zip
+        run: |
+          python3 -c "
+          import zipfile, os
+          skip = {'__pycache__'}
+          with zipfile.ZipFile('frontend_deploy.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+              zf.write('requirements.txt', 'requirements.txt')
+              for root, dirs, files in os.walk('frontend'):
+                  dirs[:] = [d for d in dirs if d not in skip]
+                  for f in files:
+                      fp = os.path.join(root, f)
+                      zf.write(fp, fp.replace(os.sep, '/'))
+          print('Frontend zip ready')
+          "
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: fabplay-v1-frontend
+          publish-profile: ${{ secrets.AZURE_FRONTEND_PUBLISH_PROFILE }}
+          package: frontend_deploy.zip

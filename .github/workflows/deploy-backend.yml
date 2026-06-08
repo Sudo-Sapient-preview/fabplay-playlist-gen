@@ -1,0 +1,41 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [fabplay-v1]
+    paths:
+      - 'backend/**'
+      - 'pipeline/**'
+      - 'brand_pipeline/**'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deployment zip
+        run: |
+          python3 -c "
+          import zipfile, os
+          skip = {'__pycache__'}
+          with zipfile.ZipFile('backend_deploy.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+              zf.write('requirements.txt', 'requirements.txt')
+              for folder in ['backend', 'pipeline', 'brand_pipeline']:
+                  if os.path.isdir(folder):
+                      for root, dirs, files in os.walk(folder):
+                          dirs[:] = [d for d in dirs if d not in skip]
+                          for f in files:
+                              fp = os.path.join(root, f)
+                              zf.write(fp, fp.replace(os.sep, '/'))
+          print('Backend zip ready')
+          "
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: fabplay-v1-backend
+          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          package: backend_deploy.zip
