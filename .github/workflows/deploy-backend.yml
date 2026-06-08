@@ -34,9 +34,12 @@ jobs:
           "
 
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: fabplay-v1-backend
-          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
-          package: backend_deploy.zip
-          deployment-method: zipDeploy
+        env:
+          PUBLISH_PROFILE: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+        run: |
+          USER=$(echo "$PUBLISH_PROFILE" | python3 -c "import sys,re; m=re.search(r'userName=\"([^\"]+)\"', sys.stdin.read()); print(m.group(1))")
+          PASS=$(echo "$PUBLISH_PROFILE" | python3 -c "import sys,re; m=re.search(r'userPWD=\"([^\"]+)\"', sys.stdin.read()); print(m.group(1))")
+          curl -f --max-time 300 -X POST \
+            "https://${USER}:${PASS}@fabplay-v1-backend.scm.azurewebsites.net/api/zipdeploy" \
+            --data-binary @backend_deploy.zip \
+            -H "Content-Type: application/octet-stream"
