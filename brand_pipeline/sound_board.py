@@ -38,7 +38,8 @@ Customer segment baseline adjustments (apply on top of AI targets):
 | premium   | −0.05   | −5 BPM  | +0.05        |
 | luxury    | −0.10   | −10 BPM | +0.10        |
 
-Required output structure:
+Required output structure (TARGETS ONLY — do NOT output min/max ranges; the
+system derives acceptable ranges around each target automatically):
 {
   "sound_board": {
     "energy_target": float,
@@ -56,14 +57,8 @@ Required output structure:
       "start_time": "HH:MM",
       "end_time": "HH:MM",
       "energy_target": float,
-      "energy_min": float,
-      "energy_max": float,
       "valence_target": float,
-      "valence_min": float,
-      "valence_max": float,
       "tempo_target": int,
-      "tempo_min": int,
-      "tempo_max": int,
       "danceability_target": float,
       "acousticness_target": float,
       "instrumentalness_target": float,
@@ -75,11 +70,11 @@ Required output structure:
 
 All float values must be clamped 0.0–1.0. All tempo values in BPM (int).
 The day_parts array must contain exactly the day-parts listed in the template provided.
-CRITICAL CONSTRAINT: For every day-part, the target MUST lie within its min/max range:
-  energy_min <= energy_target <= energy_max
-  valence_min <= valence_target <= valence_max
-  tempo_min <= tempo_target <= tempo_max
-The target should ideally be near the centre of the min/max range.
+Output ONLY target values — omit all *_min / *_max fields entirely to keep the
+response compact; the system synthesises ranges around each target.
+Shape each day-part's targets around the brand's music baselines, raising energy/
+tempo/danceability for lively day-parts and lowering them (raising acousticness/
+instrumentalness) for calm, intimate, or sophisticated day-parts.
 """
 
 
@@ -154,7 +149,15 @@ def get_sound_board(
             try:
                 kwargs = dict(
                     model=deployment,
-                    max_completion_tokens=1600,
+                    # GPT-5.x is a reasoning model: without reasoning_effort it spends
+                    # ~1000 completion tokens reasoning BEFORE any JSON, which is slow
+                    # and intermittently empties the budget (finish_reason=length).
+                    # "minimal" zeroes reasoning_tokens — this is a mechanical
+                    # score→target mapping that needs no deep reasoning — making the
+                    # call ~5s and reliable. Budget is then pure output headroom
+                    # (enough for the largest 5-day-part categories).
+                    max_completion_tokens=1500,
+                    reasoning_effort="minimal",
                     messages=messages,
                 )
                 if use_json_mode:
@@ -182,6 +185,7 @@ def get_sound_board(
 
                 try:
                     sound_board = _extract_json(raw)
+                    _synthesize_bands(sound_board)
                     _clamp_targets_to_ranges(sound_board)
                     _validate_sound_board(sound_board, category)
                     return sound_board
@@ -227,6 +231,34 @@ def _extract_json(raw: str) -> dict:
         if m:
             return json.loads(m.group(0))
         raise
+
+
+def _synthesize_bands(sound_board: dict) -> None:
+    """Create *_min / *_max ranges around each day-part target.
+
+    The sound-board LLM now emits targets only (no min/max) to keep its response
+    compact and fast. We synthesise symmetric ranges around each target using the
+    same band widths the model used to produce itself: energy/valence ±0.08
+    (clamped 0–1) and tempo ±6 BPM (clamped 60–200). Existing min/max values, if a
+    model still returns them, are left untouched.
+    """
+    for dp in sound_board.get("day_parts", []):
+        for param, half in (("energy", 0.08), ("valence", 0.08),
+                            ("danceability", 0.08), ("acousticness", 0.08),
+                            ("instrumentalness", 0.08)):
+            tgt = dp.get(f"{param}_target")
+            if tgt is None:
+                continue
+            if dp.get(f"{param}_min") is None:
+                dp[f"{param}_min"] = round(max(0.0, float(tgt) - half), 3)
+            if dp.get(f"{param}_max") is None:
+                dp[f"{param}_max"] = round(min(1.0, float(tgt) + half), 3)
+        tgt = dp.get("tempo_target")
+        if tgt is not None:
+            if dp.get("tempo_min") is None:
+                dp["tempo_min"] = int(max(60, float(tgt) - 6))
+            if dp.get("tempo_max") is None:
+                dp["tempo_max"] = int(min(200, float(tgt) + 6))
 
 
 def _clamp_targets_to_ranges(sound_board: dict) -> None:

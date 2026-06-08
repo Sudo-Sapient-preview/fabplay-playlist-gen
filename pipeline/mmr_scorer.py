@@ -26,8 +26,17 @@ def _norm_tempo(bpm: float) -> float:
 
 
 def _track_vec(t: dict) -> np.ndarray:
-    """Extract the 6-dim feature vector for a track (raw, before sqrt-weight)."""
-    return np.array([
+    """Extract the 6-dim feature vector for a track (raw, before sqrt-weight).
+
+    Memoised on the track dict under "_vec": the catalog is cached and reused
+    across all day-parts, so each vector is built once per generation instead of
+    once per (track × day-part). The cached arrays never reach JSON output — all
+    playlist tracks are rebuilt via _fmt_track, which copies only scalar fields.
+    """
+    v = t.get("_vec")
+    if v is not None:
+        return v
+    v = np.array([
         float(t.get("energy",           0.5)),
         float(t.get("valence",          0.5)),
         _norm_tempo(float(t.get("tempo_bpm", 120))),
@@ -35,6 +44,8 @@ def _track_vec(t: dict) -> np.ndarray:
         float(t.get("acousticness",     0.4)),
         float(t.get("instrumentalness", 0.3)),
     ], dtype=np.float32)
+    t["_vec"] = v
+    return v
 
 
 def _dp_vec(dp: dict) -> np.ndarray:
@@ -131,10 +142,12 @@ def mmr_select(
 
         best_i = int(np.argmax(scores))
         best_score = float(scores[best_i])
+        if best_score == -np.inf:
+            break
 
         chosen = pool_tracks[best_i]
         chosen["relevance_score"] = float(rel_scores[best_i])
-        chosen["mmr_score"] = best_score
+        chosen["mmr_score"] = max(best_score, 0.0)
         selected.append(chosen)
         total_duration += float(chosen.get("duration_seconds", 210))
         active[best_i] = False

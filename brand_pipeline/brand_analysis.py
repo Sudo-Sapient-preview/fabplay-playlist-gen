@@ -5,6 +5,7 @@ Outputs a Brand Profile dict with Aaker personality scores, music baselines,
 aesthetics, customer profile, and genre recommendations.
 """
 
+import html
 import json
 import logging
 import os
@@ -138,7 +139,15 @@ def get_brand_profile(
             try:
                 kwargs = dict(
                     model=deployment,
-                    max_completion_tokens=900,
+                    # GPT-5.x is a reasoning model. Without reasoning_effort it burns
+                    # ~1000 completion tokens on internal reasoning before emitting any
+                    # JSON, which is slow and intermittently returns an empty response
+                    # (finish_reason=length) when reasoning fills the budget. "minimal"
+                    # drops reasoning_tokens to 0 — faster and reliable — and this
+                    # score-extraction task needs no deep reasoning. Budget is then
+                    # pure output headroom.
+                    max_completion_tokens=1200,
+                    reasoning_effort="minimal",
                     messages=messages,
                 )
                 if use_json_mode:
@@ -168,6 +177,7 @@ def get_brand_profile(
                     profile = _extract_json(raw)
                     if "brand_name" not in profile:
                         profile["brand_name"] = inputs.get("brand_name", "")
+                    _unescape_profile(profile)
                     return profile
 
                 except (json.JSONDecodeError, ValueError) as e:
@@ -193,6 +203,17 @@ def get_brand_profile(
         f"Failed to parse Brand Profile JSON after {max_retries} attempts. "
         "Check azure_openai_debug.log for details."
     )
+
+
+def _unescape_profile(profile: dict) -> None:
+    """Decode any HTML entities the model echoed into string fields (e.g. a genre
+    coming back as 'alt-R&amp;B' instead of 'alt-R&B'). Walks strings and lists of
+    strings in place; non-string values are left untouched."""
+    for key, val in profile.items():
+        if isinstance(val, str):
+            profile[key] = html.unescape(val)
+        elif isinstance(val, list):
+            profile[key] = [html.unescape(v) if isinstance(v, str) else v for v in val]
 
 
 def _extract_json(raw: str) -> dict:

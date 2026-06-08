@@ -4,6 +4,7 @@ Serves the UI and proxies API calls to the MMR backend on port 8001.
 """
 
 import httpx
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
@@ -14,9 +15,25 @@ from dotenv import load_dotenv
 # Load .env from parent directory
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
+# Default to 127.0.0.1 (not "localhost") for local runs: on Windows "localhost"
+# resolves to IPv6 ::1 first and stalls ~2s per request before falling back to
+# IPv4. In production BACKEND_URL is set to the backend's Azure URL.
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8001")
 
-app = FastAPI(title="Brandbeat")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # One shared client with keep-alive: reuses connections across requests
+    # instead of opening (and TLS-handshaking, in prod) a fresh one each call.
+    app.state.client = httpx.AsyncClient(
+        timeout=120.0,
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+    )
+    yield
+    await app.state.client.aclose()
+
+
+app = FastAPI(title="Brandbeat", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).parent / "static"
 SONGS_DIR = Path(os.getenv("SONGS_DIR", str(Path(__file__).parent.parent.parent / "songs")))
@@ -79,14 +96,13 @@ async def proxy_api(path: str, request: Request):
                if k.lower() not in ("host", "content-length", "transfer-encoding")}
 
     body = await request.body()
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.request(
-            method=request.method,
-            url=url,
-            headers=headers,
-            content=body,
-            params=request.query_params,
-        )
+    resp = await request.app.state.client.request(
+        method=request.method,
+        url=url,
+        headers=headers,
+        content=body,
+        params=request.query_params,
+    )
 
     return Response(
         content=resp.content,
@@ -102,13 +118,12 @@ async def proxy_songs(path: str, request: Request):
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in ("host", "content-length", "transfer-encoding")}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.request(
-            method="GET",
-            url=url,
-            headers=headers,
-            params=request.query_params,
-        )
+    resp = await request.app.state.client.request(
+        method="GET",
+        url=url,
+        headers=headers,
+        params=request.query_params,
+    )
 
     return Response(
         content=resp.content,

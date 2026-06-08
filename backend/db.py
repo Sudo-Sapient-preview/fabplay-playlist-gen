@@ -187,6 +187,38 @@ def fetch_all_songs() -> list[dict]:
     return list(rows)
 
 
+_valid_song_ids: set[str] = set()
+_valid_song_ids_ts: float = 0.0
+_VALID_IDS_TTL = 300.0   # 5 minutes
+
+
+def fetch_valid_song_ids() -> set[str]:
+    """Return the set of song IDs that exist in the `songs` table (the FK target
+    for user_playlist_songs.song_id), cached for 5 minutes.
+
+    The catalog (analysis_song_features, ~19.5k) is a superset of `songs` (~18.5k);
+    ~1k tracks live only in analysis_song_features. Inserting those into
+    user_playlist_songs violates the FK, so callers pre-filter against this set.
+    Returned IDs are normalised to str so membership tests are type-agnostic.
+    """
+    import time
+    global _valid_song_ids, _valid_song_ids_ts
+    if _valid_song_ids and (time.time() - _valid_song_ids_ts) < _VALID_IDS_TTL:
+        return _valid_song_ids
+    for attempt in range(2):
+        try:
+            rows = _paginate(get_supabase().table("songs").select("id"))
+            break
+        except Exception as e:
+            if attempt == 0 and any(kw in str(e).lower() for kw in ("disconnect", "connection")):
+                reset_supabase()
+                continue
+            raise
+    _valid_song_ids = {str(r["id"]) for r in rows if r.get("id") is not None}
+    _valid_song_ids_ts = time.time()
+    return _valid_song_ids
+
+
 def fetch_songs_filtered(
     tempo_min: float = 60,   tempo_max: float = 180,
     energy_min: float = 0.0, energy_max: float = 1.0,
@@ -272,30 +304,33 @@ def search_by_embedding(
     return rows
 
 
+def _norm_genre(g: str) -> str:
+    """Lowercase and unify separators so 'Hip-Hop', 'hip hop' and 'hip_hop' all match."""
+    return (g or "").lower().replace(" ", "_").replace("/", "_").replace("-", "_")
+
+
 def fetch_songs_by_artist(artist_name: str) -> list[dict]:
-    result = (
-        get_supabase()
-        .table("analysis_song_features")
-        .select(_SONG_COLS)
-        .ilike("artist", f"%{artist_name}%")
-        .execute()
-    )
-    return _normalize(result.data or [])
+    """Substring artist match against the in-memory catalog cache (no DB round-trip).
+
+    Artists in the cache are already lower-cased by _remap_songs, so this is a
+    plain case-insensitive substring test. Used as the must-include fallback when
+    an artist isn't already in the candidate pool.
+    """
+    needle = (artist_name or "").strip().lower()
+    if not needle:
+        return []
+    return [s for s in fetch_all_songs() if needle in (s.get("artist") or "")]
 
 
 def fetch_songs_by_genre(genre_name: str) -> list[dict]:
-    # ilike is case-insensitive; keep spaces so DB values like "Christian Devotional" match
-    query_str = genre_name.lower()
-    result = (
-        get_supabase()
-        .table("analysis_song_features")
-        .select(_SONG_COLS)
-        .ilike("genre", f"%{query_str}%")
-        .execute()
-    )
-    rows = _normalize(result.data or [])
-    return [
-        s for s in rows
-        if str(s.get("id")) not in _HIDDEN_IDS
-        and (s.get("genre") or "").lower() not in _EXCLUDED_GENRES
-    ]
+    """Normalised genre match against the in-memory catalog cache (no DB round-trip).
+
+    Matching is separator-agnostic ('hip-hop' matches the catalog's 'hip_hop'),
+    which both fixes hyphen/underscore mismatches and removes the per-genre DB
+    ilike queries that previously ran once per day-part for genres absent from the
+    candidate pool. _HIDDEN_IDS / _EXCLUDED_GENRES are already applied by fetch_all_songs.
+    """
+    target = _norm_genre(genre_name)
+    if not target:
+        return []
+    return [s for s in fetch_all_songs() if target in _norm_genre(s.get("genre", ""))]

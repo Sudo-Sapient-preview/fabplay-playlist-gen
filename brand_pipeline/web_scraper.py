@@ -6,6 +6,7 @@ Gracefully returns "" if the API key is missing or the scrape fails.
 """
 
 import os
+import html
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,10 @@ def scrape_brand_website(url: str, char_limit: int | None = None) -> str:
         app = FirecrawlApp(api_key=api_key)
         result = app.scrape_url(url, params={"formats": ["markdown"], "timeout": 15000})
         content = (result or {}).get("markdown", "") or ""
+        # Firecrawl markdown can carry HTML entities (&amp;, &#39;, &quot;) straight
+        # from the page source; unescape them so the LLM sees "R&B", not "R&amp;B",
+        # and never echoes the entity into brand fields like recommended_genres.
+        content = html.unescape(content)
         return (content[:char_limit] if char_limit else content).strip()
     except Exception as e:
         logger.warning("Firecrawl scrape failed for %s: %s", url, e)

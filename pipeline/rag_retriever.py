@@ -223,9 +223,19 @@ def retrieve_candidates(
     if not all_playable:
         return [], [], {"filtered_count": 0, "skipped": True}
 
-    # 3. Sort by relevance to this day-part; put fresh (unused) tracks first so
-    #    the MAX_CANDIDATES window is dominated by songs not yet in earlier day-parts.
-    all_playable.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
+    # 3. Sort by relevance to this day-part, with a genre-match boost so tracks
+    #    whose genre aligns with the day-part's genre_emphasis float to the top.
+    #    Put fresh (unused) tracks first so the MAX_CANDIDATES window is dominated
+    #    by songs not yet in earlier day-parts.
+    _genre_emphasis = {_norm_genre(g) for g in (day_part_params.get("genre_emphasis") or [])}
+
+    def _sort_key(t: dict) -> float:
+        rel = compute_relevance(t, day_part_params)
+        if _genre_emphasis and _norm_genre(t.get("genre", "")) in _genre_emphasis:
+            rel *= 1.15
+        return rel
+
+    all_playable.sort(key=_sort_key, reverse=True)
     if used_song_ids:
         fresh = [t for t in all_playable if t.get("song_id") not in used_song_ids]
         stale = [t for t in all_playable if t.get("song_id") in used_song_ids]
