@@ -109,9 +109,9 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" style="align-items:start">
       <template x-for="b in brands" :key="b.id">
         <div class="brand-card" style="position:relative"
-             @mouseenter="hoverBrand(b.id)"
+             @mouseenter="!isMobile && hoverBrand(b.id)"
              @mouseleave="hoveredBrand=null"
-             @click="hoveredBrand===b.id ? hoveredBrand=null : hoverBrand(b.id)">
+             @click="isMobile ? openLatestPlaylist(b.id) : (hoveredBrand===b.id ? hoveredBrand=null : hoverBrand(b.id))">
           <!-- Brand header -->
           <div class="flex items-center gap-3 mb-3">
             <div class="brand-emoji" :style="'background:'+catColor(b.category)+'15'" x-text="catEmoji(b.category)"></div>
@@ -122,7 +122,7 @@
           </div>
           <!-- Footer -->
           <div class="flex items-center text-xs pt-2" style="border-top:1px solid var(--bdr);color:var(--faint)">
-            <span x-text="(brandPlaylistCacheLoaded[b.id]?(brandPlaylistCache[b.id]||[]).length:(b.playlist_count||0))+' playlist'+((brandPlaylistCacheLoaded[b.id]?(brandPlaylistCache[b.id]||[]).length:(b.playlist_count||0))!==1?'s':'')"></span>
+            <span x-show="!isMobile" x-text="(brandPlaylistCacheLoaded[b.id]?(brandPlaylistCache[b.id]||[]).length:(b.playlist_count||0))+' playlist'+((brandPlaylistCacheLoaded[b.id]?(brandPlaylistCache[b.id]||[]).length:(b.playlist_count||0))!==1?'s':'')"></span>
             <span class="ml-auto" x-text="b.last_generated_at?'Last generated '+_timeAgo(b.last_generated_at):b.last_updated?'Updated '+_timeAgo(b.last_updated):'No playlists yet'"></span>
           </div>
           <!-- Expanded playlists -->
@@ -168,8 +168,8 @@
   </div>
 </div>
 
-<!-- ─── CREATE NEW BRAND (5-step wizard) ─── -->
-<div x-show="page==='brand-create'" class="fade" id="page-create">
+<!-- ─── CREATE NEW BRAND (5-step wizard) — DESKTOP ONLY ─── -->
+<div x-show="page==='brand-create' && !isMobile" class="fade" id="page-create">
   <div class="page-header">
     <div class="flex items-center gap-3">
       <button @click="curBrand?page='soundboard':goHome()" class="btn-back">
@@ -426,6 +426,156 @@
   </div>
 </div>
 
+<!-- ─── CREATE NEW BRAND — MOBILE (simplified 3-screen flow) ─── -->
+<!-- Skips asset upload, genre selection, and the soundboard UI. The same
+     backend pipeline runs: /api/generate builds the brand profile + soundboard
+     in the background, so opening this brand on desktop later shows the full
+     soundboard. -->
+<div x-show="page==='brand-create' && isMobile" class="fade" id="page-create-mobile">
+  <div class="page-header">
+    <div class="flex items-center gap-3">
+      <button @click="mStep>0 ? mStep-- : (curBrand?page='soundboard':goHome())" class="btn-back">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div>
+        <h1 class="page-title">Create Brand</h1>
+        <p class="page-sub">Step <span x-text="mStep+1"></span> of 3</p>
+      </div>
+    </div>
+  </div>
+  <div class="px-4 py-4">
+    <!-- progress bar (3 segments) -->
+    <div class="m-steps mb-5">
+      <template x-for="i in 3" :key="i">
+        <div class="m-step-seg" :class="(i-1)<=mStep?'on':''"></div>
+      </template>
+    </div>
+
+    <!-- MOBILE SCREEN 1 — Basic Info -->
+    <div x-show="mStep===0" class="card p-5 space-y-4">
+      <div>
+        <label class="lbl">Brand Name *</label>
+        <input type="text" x-model="form.brand_name" class="inp" placeholder="e.g., Café Bloom">
+      </div>
+      <div>
+        <label class="lbl">Business Category *</label>
+        <select x-model="form.category" class="inp sel">
+          <option value="">Select category</option>
+          <template x-for="c in cats" :key="c.v"><option :value="c.v" x-text="c.l"></option></template>
+        </select>
+      </div>
+      <div>
+        <label class="lbl">Website URL</label>
+        <input type="url" x-model="form.website_url" class="inp" placeholder="https://www.example.com">
+      </div>
+      <div>
+        <label class="lbl">Brand Description</label>
+        <textarea x-model="form.brand_description" class="inp" rows="3" placeholder="Describe your brand..."></textarea>
+      </div>
+      <button @click="mNext0()" class="btn btn-r" style="width:100%" :disabled="!form.brand_name||!form.category||analyzing">
+        <svg x-show="analyzing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span x-text="analyzing?'Analyzing…':'Continue →'"></span>
+      </button>
+    </div>
+
+    <!-- MOBILE SCREEN 2 — Customer Profile -->
+    <div x-show="mStep===1" class="card p-5 space-y-5">
+      <h3 class="font-bold text-base">Who are your customers?</h3>
+      <p class="text-xs text-[var(--muted)]" style="margin-top:-8px" x-text="analyzing?'Generating AI suggestions…':'AI suggestions — tap to select'"></p>
+
+      <!-- What do people do here -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">What do people do here?</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="a in suggestions.activities" :key="a">
+            <button type="button" @click="toggleChip(form.visitor_activity,a)"
+              :class="form.visitor_activity.includes(a)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.visitor_activity.includes(a)?'✓ ':'')+a"></button>
+          </template>
+          <span x-show="!suggestions.activities.length" class="text-xs text-[var(--faint)] italic py-1">Analyzing brand…</span>
+        </div>
+      </div>
+
+      <!-- Who walks through the door -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">Who walks through the door?</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="t in suggestions.customer_types" :key="t">
+            <button type="button" @click="toggleChip(form.customer_types,t)"
+              :class="form.customer_types.includes(t)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.customer_types.includes(t)?'✓ ':'')+t"></button>
+          </template>
+          <span x-show="!suggestions.customer_types.length" class="text-xs text-[var(--faint)] italic py-1">Analyzing brand…</span>
+        </div>
+      </div>
+
+      <!-- Spending Level -->
+      <div>
+        <label class="lbl mb-2" style="font-weight:700;color:#1A1A1A;">Spending Level</label>
+        <div class="grid grid-cols-2 gap-2">
+          <template x-for="s in segs" :key="s.v">
+            <div @click="form.customer_segment=s.v" class="sel-card" :class="form.customer_segment===s.v?'active':''">
+              <div class="sc-title" x-text="s.l"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Age range -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="lbl mb-2" style="font-weight:700;color:#1A1A1A;">Min Age — <span x-text="form.age_min"></span></label>
+          <input type="range" min="15" max="80" x-model.number="form.age_min" style="width:100%;accent-color:var(--penguin-red)">
+        </div>
+        <div>
+          <label class="lbl mb-2" style="font-weight:700;color:#1A1A1A;">Max Age — <span x-text="form.age_max"></span></label>
+          <input type="range" min="15" max="80" x-model.number="form.age_max" style="width:100%;accent-color:var(--penguin-red)">
+        </div>
+      </div>
+
+      <!-- Lifestyle -->
+      <div>
+        <label class="lbl mb-1" style="font-weight:700;color:#1A1A1A;">Lifestyle Tags</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="t in suggestions.lifestyle" :key="t">
+            <button type="button" @click="toggleChip(form.lifestyle_tags,t)"
+              :class="form.lifestyle_tags.includes(t)?'chip-btn chip-on':'chip-btn'"
+              x-text="(form.lifestyle_tags.includes(t)?'✓ ':'')+t"></button>
+          </template>
+          <span x-show="!suggestions.lifestyle.length" class="text-xs text-[var(--faint)] italic py-1">—</span>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-1">
+        <button @click="mStep=0" class="btn btn-w" style="flex:1">← Back</button>
+        <button @click="mStep=2" class="btn btn-r" style="flex:1">Review →</button>
+      </div>
+    </div>
+
+    <!-- MOBILE SCREEN 3 — Review -->
+    <div x-show="mStep===2" class="card p-5 space-y-4">
+      <h3 class="font-bold text-base">Review</h3>
+      <div class="review-table">
+        <div class="review-row"><span class="review-label">Brand</span><span class="review-val" x-text="form.brand_name||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Category</span><span class="review-val" x-text="catLabel(form.category)||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Website</span><span class="review-val" x-text="form.website_url||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Customers</span><span class="review-val" x-text="form.customer_types.join(', ')||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Spending</span><span class="review-val" x-text="(segs.find(s=>s.v===form.customer_segment)||{}).l||'—'"></span></div>
+        <div class="review-row"><span class="review-label">Age Range</span><span class="review-val" x-text="form.age_min+'–'+form.age_max"></span></div>
+      </div>
+      <p class="text-xs text-[var(--muted)]">We'll automatically build a day-part playlist tuned to your brand.</p>
+      <div class="flex gap-2 pt-1">
+        <button @click="mStep=1" class="btn btn-w" style="flex:1">← Back</button>
+        <button @click="mCreatePlaylist()" class="btn btn-green" style="flex:1" :disabled="submitting">
+          <svg x-show="!submitting" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg x-show="submitting" style="animation:spin .8s linear infinite" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.364-6.364-2.121 2.121M8.757 15.243l-2.121 2.121m0-12.728 2.121 2.121m8.486 8.486 2.121 2.121"/></svg>
+          <span x-text="submitting?'Creating…':'Create Playlist'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ─── SOUND BOARD DETAIL ─── -->
 <div x-show="page==='soundboard'" class="fade" id="page-soundboard">
   <div class="page-header">
@@ -623,7 +773,7 @@
         <p class="page-sub" x-text="(curBrand?.brand_name||'')+(curPl?.day_parts?.length?' — '+curPl.day_parts.length+' time slots':'')"></p>
       </div>
     </div>
-    <div class="flex gap-2">
+    <div class="flex gap-2" x-show="!isMobile">
       <button @click="goToSoundboard()" class="btn btn-w">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
         Soundboard
@@ -633,9 +783,14 @@
         Regenerate
       </button>
     </div>
+    <!-- Mobile: keep Regenerate only, top-right -->
+    <button x-show="isMobile" @click="generatePlaylist(curBrand?.id)" class="btn btn-w">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Regenerate
+    </button>
   </div>
   <div class="px-4 py-4 md:px-7 md:py-6" x-show="curPl?.day_parts?.length">
-    <div class="flex gap-1 overflow-x-auto pb-2 mb-5">
+    <div class="flex gap-1 overflow-x-auto pb-2 mb-5 pl-dp-tabs">
       <template x-for="(dp,i) in (curPl?.day_parts??[])" :key="i">
         <button @click="activeDp=i;plGenreFilter=''" class="dp-tab" :class="activeDp===i?'on':''">
           <span x-text="dp.name"></span>
@@ -645,7 +800,7 @@
     </div>
     <template x-if="curPl?.day_parts?.[activeDp]">
       <div class="fade space-y-4">
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3" x-show="!isMobile">
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="curPl.day_parts[activeDp].track_count"></div><div class="text-[10px] text-[var(--faint)]">tracks</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="Math.round((curPl.day_parts[activeDp].total_duration_seconds||0)/60)+'m'"></div><div class="text-[10px] text-[var(--faint)]">duration</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" :class="(curPl.day_parts[activeDp].avg_bfs||0)>=.75?'text-emerald-600':(curPl.day_parts[activeDp].avg_bfs||0)>=.5?'text-amber-500':'text-red-500'" x-text="(curPl.day_parts[activeDp].avg_bfs||0).toFixed(3)"></div><div class="text-[10px] text-[var(--faint)]">avg BFS</div></div>
@@ -653,9 +808,9 @@
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].energy_target||0).toFixed(2)"></div><div class="text-[10px] text-[var(--faint)]">energy</div></div>
           <div class="card-sm px-4 py-3 text-center"><div class="font-bold text-lg" x-text="(curPl.day_parts[activeDp].tempo_target||0)+' BPM'"></div><div class="text-[10px] text-[var(--faint)]">tempo</div></div>
         </div>
-        <div class="card-sm px-4 py-3"><p class="text-sm text-[var(--muted)] italic" x-text="curPl.day_parts[activeDp].character_description||'—'"></p></div>
+        <div class="card-sm px-4 py-3" x-show="!isMobile"><p class="text-sm text-[var(--muted)] italic" x-text="curPl.day_parts[activeDp].character_description||'—'"></p></div>
         <!-- Genre filter -->
-        <div class="flex items-center gap-2 mb-3">
+        <div class="flex items-center gap-2 mb-3" x-show="!isMobile">
           <span class="text-xs font-semibold" style="color:var(--muted)">Genre</span>
           <select x-model="plGenreFilter" class="text-xs rounded-lg px-2 py-1 outline-none" style="border:1px solid var(--bdr);background:#fff;color:var(--text);font-family:inherit;cursor:pointer">
             <option value="">All Genres</option>
@@ -664,7 +819,7 @@
           <span x-show="plGenreFilter" class="text-xs" style="color:var(--faint)" x-text="filteredDpTracks.length+' track'+(filteredDpTracks.length!==1?'s':'')"></span>
         </div>
 
-        <div class="card" style="overflow:visible">
+        <div class="card" style="overflow:visible" x-show="!isMobile">
           <!-- Remove selected bar -->
           <div x-show="selectedCountInDp(activeDp)>0"
                class="flex items-center justify-between px-4 py-2 bg-red-50 border-b border-red-100" style="border-radius:14px 14px 0 0">
@@ -716,6 +871,20 @@
           </template>
           </div>
           </div><!-- /table-scroll-wrap -->
+        </div>
+
+        <!-- Mobile: simplified track list — number, play, title only. No scroll. -->
+        <div class="card" style="overflow:hidden" x-show="isMobile">
+          <template x-for="(t,ti) in filteredDpTracks" :key="t._origIdx">
+            <div class="m-tr" :class="npTrackKey===t._origIdx+'-'+activeDp?'playing':''" @click="npTrackKey===t._origIdx+'-'+activeDp ? togglePlay() : playTrack(t,t._origIdx,activeDp)">
+              <span class="m-tr-num" x-text="t._origIdx+1"></span>
+              <span class="m-tr-play">
+                <svg x-show="!(npTrackKey===t._origIdx+'-'+activeDp && npPlaying)" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+                <svg x-show="npTrackKey===t._origIdx+'-'+activeDp && npPlaying" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              </span>
+              <span class="m-tr-title" x-text="t.title||'Unknown'"></span>
+            </div>
+          </template>
         </div>
       </div>
     </template>

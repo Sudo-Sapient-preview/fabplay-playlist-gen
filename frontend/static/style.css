@@ -241,7 +241,9 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 .np-artist{font-size:.70rem;color:rgba(255,255,255,.45);margin-top:1px}
 .np-scrub{display:flex;align-items:center;gap:8px;margin-top:5px}
 .np-time{font-size:.60rem;color:rgba(255,255,255,.35);width:30px;text-align:center}
-.scrub{flex:1;-webkit-appearance:none;appearance:none;height:2px;border-radius:2px;background:rgba(255,255,255,.15);outline:none;cursor:pointer;accent-color:var(--penguin-red)}
+.scrub{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:rgba(184,69,31,.35);outline:none;cursor:pointer;accent-color:var(--penguin-red)}
+.scrub::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:var(--penguin-red);border:2px solid #fff;cursor:pointer}
+.scrub::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--penguin-red);border:2px solid #fff;cursor:pointer}
 .np-ctrl button{background:transparent;border:none;color:rgba(255,255,255,.6);cursor:pointer;padding:4px;border-radius:4px;transition:color 120ms ease;font-family:inherit}
 .np-ctrl button:hover{color:#fff}
 
@@ -298,6 +300,20 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
 .pl-row-actions{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity .15s}
 .group:hover .pl-row-actions{opacity:1}
 
+/* ── Mobile create flow: 3-segment progress bar ── */
+.m-steps{display:flex;gap:6px}
+.m-step-seg{flex:1;height:4px;border-radius:99px;background:var(--hairline);transition:background 160ms ease}
+.m-step-seg.on{background:var(--penguin-red)}
+
+/* ── Mobile playlist: simplified track rows (number · play · title) ── */
+.m-tr{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--hairline);cursor:pointer}
+.m-tr:last-child{border-bottom:none}
+.m-tr-num{width:22px;text-align:center;font-size:.72rem;color:var(--faint);flex-shrink:0}
+.m-tr-play{flex-shrink:0;color:var(--faint);display:flex;align-items:center}
+.m-tr.playing .m-tr-play{color:var(--penguin-red)}
+.m-tr.playing .m-tr-title{color:var(--penguin-red);font-weight:600}
+.m-tr-title{font-size:.88rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
 @media (max-width:767px){
   /* Top bar — hide email, tighten padding */
   .topbar-email{display:none}
@@ -308,6 +324,10 @@ h1,h2,h3,h4,h5,h6,.page-title,.stat-card-number,.stat-n{font-family:var(--font-h
   .page-title{font-size:1rem}
   .page-header .btn{padding:7px 12px;font-size:.76rem}
   .btn-back{padding:2px}
+
+  /* ── Day-part tabs: wrap to fit the screen instead of horizontal scroll ── */
+  #page-playlists .pl-dp-tabs{flex-wrap:wrap;overflow-x:visible}
+  #page-playlists .pl-dp-tabs .dp-tab{flex:0 0 auto}
 
   /* ── Playlists page header: stretch action buttons full-width when wrapped ── */
   #page-playlists .page-header>.flex.gap-2{width:100%}

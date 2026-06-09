@@ -14,6 +14,14 @@ return {
   brandSearch: '',
   createStep: 0,
 
+  // ── Mobile (≤767px) adaptive state ──────────
+  // isMobile drives a simplified 3-screen create flow; desktop keeps the
+  // full 5-step wizard. Both call the same backend, so the brand-creation
+  // pipeline is identical — only the UI differs. mStep tracks the mobile
+  // screen: 0=Basic Info, 1=Customer Profile, 2=Review.
+  isMobile: window.matchMedia('(max-width:767px)').matches,
+  mStep: 0,
+
   // ── Auth state ──────────────────────────────
   currentUser: null,
   currentRole: 'viewer',
@@ -168,7 +176,12 @@ return {
     // Load non-critical data in background after UI is shown
     Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres(), this.loadCatalogArtists()]);
 
+    // Keep isMobile reactive: switching viewport width swaps desktop⇄mobile UI live.
+    window.matchMedia('(max-width:767px)').addEventListener('change', e => { this.isMobile = e.matches; });
+
     this.$watch('page', async val => {
+      // Reset the mobile create flow to its first screen whenever it's opened.
+      if(val==='brand-create') this.mStep=0;
       if(val==='soundboard'){
         if(this.curBrand && !this.curBrand.sound_board_result){
           this.sbDataLoading=true;
@@ -342,6 +355,25 @@ return {
     this.plLoading=false;
   },
 
+  // Mobile: tapping a brand card opens its most recent playlist directly
+  // (no expand-to-list step). Falls back to the empty playlist page if the
+  // brand somehow has none yet.
+  async openLatestPlaylist(brandId){
+    const b=this.brands.find(x=>x.id===brandId);
+    if(b)this.curBrand=b;
+    let pls=this.brandPlaylistCacheLoaded[brandId]?this.brandPlaylistCache[brandId]:null;
+    if(!pls){
+      try{const r=await this.apiFetch('/api/brands/'+brandId+'/playlists');const d=r&&r.ok?await r.json():null;pls=(d&&d.playlists)||[];}catch(e){pls=[];}
+      this.brandPlaylistCache={...this.brandPlaylistCache,[brandId]:pls};
+      this.brandPlaylistCacheLoaded={...this.brandPlaylistCacheLoaded,[brandId]:true};
+    }
+    if(pls&&pls.length){
+      this.openBrandAndPlaylist(brandId,pls[0].playlist_id);
+    }else{
+      this.activeDp=0;this.page='playlists';this.curPl=null;this.plLoading=false;
+    }
+  },
+
   _pruneStaleGenres(){
     if(!this.curBrand||!this.catalogGenresLoaded)return;
     const valid=new Set(this._expandGenreList(this.genres));
@@ -471,14 +503,15 @@ return {
   },
 
   // ── Brand creation ─────────────────────────
-  async analyzeAndContinue(){
-    // Step should advance only after analysis completes.
-    this.analyzing=true;
+  // Runs the AI quick-analyze and populates customer-profile suggestions on the
+  // shared `form`. Returns true on success, false (and alerts) on failure.
+  // Shared by the desktop wizard (analyzeAndContinue) and the mobile flow (mNext0).
+  async _quickAnalyze(){
     try{
       const r=await this.apiFetch('/api/quick-analyze',{method:'POST',body:JSON.stringify({brand_name:this.form.brand_name,website_url:this.form.website_url,category:this.form.category})});
       if(!r||!r.ok){
         alert('Could not analyze brand details right now. Please try again.');
-        return;
+        return false;
       }
       const s=await r.json();
       if(s.customer_segment)this.form.customer_segment=s.customer_segment;
@@ -492,14 +525,54 @@ return {
       if(!this.form.visitor_activity.length)this.form.visitor_activity=[...this.suggestions.activities];
       if(!this.form.customer_types.length)this.form.customer_types=[...this.suggestions.customer_types];
       if(!this.form.lifestyle_tags.length)this.form.lifestyle_tags=[...this.suggestions.lifestyle];
+      return true;
+    }catch(e){
+      alert('Could not analyze brand details right now. Please try again.');
+      return false;
+    }
+  },
+
+  async analyzeAndContinue(){
+    // Step should advance only after analysis completes.
+    this.analyzing=true;
+    try{
+      if(!await this._quickAnalyze())return;
       // Ensure DB-backed genres and artists are ready by the time user reaches the genre step.
       if(!this.catalogGenresLoaded) await this.loadCatalogGenres();
       if(!this.catalogArtistsLoaded) await this.loadCatalogArtists();
       this.createStep++;
-    }catch(e){
-      alert('Could not analyze brand details right now. Please try again.');
     }
     finally{this.analyzing=false}
+  },
+
+  // ── Mobile create flow ─────────────────────
+  // Screen 0 → analyze → Screen 1 (customer profile). No genre/asset steps.
+  async mNext0(){
+    if(!this.form.brand_name||!this.form.category)return;
+    this.analyzing=true;
+    try{ if(await this._quickAnalyze()) this.mStep=1; }
+    finally{this.analyzing=false}
+  },
+
+  // Review screen → create the brand, then generate the playlist directly.
+  // No genre selection and no asset upload on mobile; the backend builds the
+  // brand profile + soundboard internally (api.py _bg_playlist) when missing,
+  // so the full pipeline still runs — just invisibly. _pollGen then navigates
+  // straight to the finished playlist with day-parts.
+  async mCreatePlaylist(){
+    this.submitting=true;
+    try{
+      const body={...this.form,customer_description:this.form.customer_types.length?this.form.customer_types.join(', '):this.form.customer_description,asset_analysis:'',include_genres:this._expandGenreList(this.form.include_genres),exclude_genres:this._expandGenreList(this.form.exclude_genres)};
+      const r=await this.apiFetch('/api/brands',{method:'POST',body:JSON.stringify(body)});
+      if(!r||!r.ok)throw new Error('Failed');
+      const brand=await r.json();
+      await this.loadBrands();
+      this.curBrand=brand;this.curPl=null;this._origRanges={};this._origTargets={};
+      const plName=((brand.brand_name||'My').trim())+' Playlist';
+      this._resetForm();this.mStep=0;
+      this._startGenerate(brand.id,plName);
+    }catch(e){alert('Error: '+e.message)}
+    finally{this.submitting=false}
   },
 
   async analyzeAssetsAndContinue(){
