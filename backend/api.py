@@ -1261,6 +1261,14 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
             must_inc  = apply_exclusion_filters_only(must_inc,  dp_inputs)
             genre_inc = apply_exclusion_filters_only(genre_inc, dp_inputs)
 
+            # Cross-day-part dedup for injected tracks. The genre/artist injection
+            # helpers re-fetch the same top tracks for every day-part (they have
+            # SQL fallbacks that ignore used_song_ids), and mmr_select seeds them
+            # at the HEAD of the playlist — so without this filter the same songs
+            # get pinned to the start of every day-part.
+            must_inc  = [t for t in must_inc  if t.get("song_id") not in used_song_ids]
+            genre_inc = [t for t in genre_inc if t.get("song_id") not in used_song_ids]
+
             logger.warning("genre_inc for %s: %s", dp_name, [(t.get('title'), t.get('genre')) for t in genre_inc])
             if genre_inc:
                 task_log(tid, f"  {dp_name}: injecting {len(genre_inc)} genre track(s): {', '.join(t.get('title','?') for t in genre_inc)}")
