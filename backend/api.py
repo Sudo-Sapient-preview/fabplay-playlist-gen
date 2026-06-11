@@ -1250,8 +1250,8 @@ def _bg_playlist(brand_id: str, tid: str, genre_overrides: Optional[dict] = None
                 task_log(tid, f"  {dp_name}: catalog too small for full dedup, reusing pool")
 
             target_n   = target_track_count(dp)
-            must_inc   = fetch_must_include_tracks(include_list, candidates, target_n)
-            genre_inc  = fetch_must_include_genre_tracks(include_genre_list, candidates, target_n)
+            must_inc   = fetch_must_include_tracks(include_list, candidates, target_n, day_part_params=dp)
+            genre_inc  = fetch_must_include_genre_tracks(include_genre_list, candidates, target_n, day_part_params=dp)
 
             # Genre/artist injection has SQL/cache fallbacks that bypass the hard
             # filters, so a label like AMU could leak FPO tracks for genres AMU

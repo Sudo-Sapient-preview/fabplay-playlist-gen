@@ -250,12 +250,15 @@ def fetch_must_include_tracks(
     must_include_artists: list[str],
     candidates:           list[dict],
     target_count:         int,
+    day_part_params:      dict | None = None,
 ) -> list[dict]:
     """
     Pre-select tracks for must-include artists.
     - First looks in candidates pool.
     - Falls back to direct SQL query if artist not found.
     - Capped at 15% of target playlist length.
+    - When day_part_params is given, each artist's tracks are ranked by
+      relevance to the day-part targets so the best-fitting ones are injected.
 
     Returns list of track dicts to be injected at head of final playlist.
     """
@@ -289,7 +292,11 @@ def fetch_must_include_tracks(
                 logger.warning("Must-include artist '%s' has no playable URLs. Skipping.", artist_name)
                 continue
 
-        # Take best 1–2 tracks per must-include artist
+        # Take best 1–2 tracks per must-include artist. No relevance floor here:
+        # the artist was explicitly requested, so we honour it with their
+        # closest-fitting tracks even when the fit is imperfect.
+        if day_part_params:
+            matches.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
         selected.extend(matches[:2])
         if len(selected) >= cap:
             break
@@ -297,16 +304,28 @@ def fetch_must_include_tracks(
     return selected[:cap]
 
 
+# Injected genre tracks must fit the day-part at least this well (BFS floor).
+# Body tracks picked by MMR typically score ~0.8; below this floor a genre
+# match is a mood mismatch (e.g. a max-energy track in a gentle morning slot)
+# and gets skipped rather than pinned to the head of the playlist.
+MIN_GENRE_INJECT_RELEVANCE = 0.65
+
+
 def fetch_must_include_genre_tracks(
-    include_genres: list[str],
-    candidates:     list[dict],
-    target_count:   int,
+    include_genres:  list[str],
+    candidates:      list[dict],
+    target_count:    int,
+    day_part_params: dict | None = None,
 ) -> list[dict]:
     """
     Pre-select tracks for must-include genres.
     - First looks in candidates pool.
     - Falls back to direct SQL query if genre not found.
     - Capped at 30% of target playlist length.
+    - When day_part_params is given, matches are ranked by relevance to the
+      day-part targets (the BFS score) and tracks below
+      MIN_GENRE_INJECT_RELEVANCE are dropped, so genre injection can no longer
+      pin poorly-fitting songs to the head of every day-part.
 
     Returns list of track dicts to be injected into candidates.
     """
@@ -346,6 +365,19 @@ def fetch_must_include_genre_tracks(
             ]
             if not matches:
                 logger.warning("Must-include genre '%s' has no playable URLs. Skipping.", genre_name)
+                continue
+
+        # Rank by fit to the day-part targets and drop mood mismatches, so the
+        # injected tracks obey the soundboard settings like every other track.
+        if day_part_params:
+            scored = [(compute_relevance(t, day_part_params), t) for t in matches]
+            scored.sort(key=lambda st: st[0], reverse=True)
+            matches = [t for rel, t in scored if rel >= MIN_GENRE_INJECT_RELEVANCE]
+            if not matches:
+                logger.warning(
+                    "Must-include genre '%s': no tracks fit the day-part targets (best relevance %.2f < %.2f). Skipping.",
+                    genre_name, scored[0][0] if scored else 0.0, MIN_GENRE_INJECT_RELEVANCE,
+                )
                 continue
 
         # Take up to 4 tracks per genre
