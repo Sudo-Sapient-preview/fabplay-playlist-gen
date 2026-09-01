@@ -7,7 +7,7 @@ from typing import Iterable
 
 import fitz
 import requests
-from openai import AzureOpenAI, RateLimitError
+from openai import OpenAI, RateLimitError
 
 from api.db import fetch_all_songs
 
@@ -66,18 +66,17 @@ _ASSET_IMAGE_PROMPT = (
 )
 
 
-def chat_client() -> tuple[AzureOpenAI, str]:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
-    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-    if not (endpoint and api_key and deployment):
-        raise RuntimeError("AZURE_OPENAI_ENDPOINT / API_KEY / DEPLOYMENT not set")
-    return AzureOpenAI(
-        azure_endpoint=endpoint,
-        api_key=api_key,
-        api_version=api_version,
-    ), deployment
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+DEFAULT_MODEL = "openai/gpt-4o-mini"
+
+
+def chat_client() -> tuple[OpenAI, str]:
+    """OpenRouter chat client (OpenAI-compatible)."""
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    model = os.getenv("OPENROUTER_MODEL", "").strip() or DEFAULT_MODEL
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY not set")
+    return OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL), model
 
 
 def scrape_website(url: str, max_chars: int = 8000) -> str:
@@ -113,7 +112,7 @@ def quick_analyze(brand_name: str, category: str, website_url: str = "", website
         user_parts.append(f"\nWebsite content (scraped):\n{website_content}")
     response = _chat_with_retry(client, 
         model=deployment,
-        max_completion_tokens=600,
+        max_tokens=600,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": QUICK_ANALYZE_PROMPT},
@@ -131,7 +130,7 @@ def music_recs_from_content(content: str) -> dict:
     try:
         response = _chat_with_retry(client, 
             model=deployment,
-            max_completion_tokens=300,
+            max_tokens=300,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _music_recommendations_prompt()},
@@ -147,9 +146,13 @@ def music_recs_from_content(content: str) -> dict:
 def _music_recommendations_prompt() -> str:
     db_genres = sorted({song.get("genre") for song in fetch_all_songs() if song.get("genre")})
     genre_list = ", ".join(
-        {"hip_hop": "Hip Hop", "soul_funk": "Soul/Funk"}.get(
-            genre, genre.replace("_", " ").title()
-        )
+        {
+            "hip_hop": "Hip Hop",
+            "soul_funk": "Soul/Funk",
+            "indi_pop": "Indi Pop",
+            "traditional_folk": "Traditional Folk",
+            "edm": "EDM",
+        }.get(genre, genre.replace("_", " ").title())
         for genre in db_genres
     )
     return f"""\
@@ -162,7 +165,7 @@ You are a brand strategist. Based on this brand asset analysis, return ONLY a va
 Only include genres from this list: {genre_list}"""
 
 
-def _analyze_pdf(client: AzureOpenAI, deployment: str, filename: str, content: bytes) -> str:
+def _analyze_pdf(client: OpenAI, deployment: str, filename: str, content: bytes) -> str:
     doc = fitz.open(stream=content, filetype="pdf")
     try:
         text = "\n".join(page.get_text() for page in doc)
@@ -170,7 +173,7 @@ def _analyze_pdf(client: AzureOpenAI, deployment: str, filename: str, content: b
         doc.close()
     response = _chat_with_retry(client, 
         model=deployment,
-        max_completion_tokens=600,
+        max_tokens=600,
         messages=[
             {"role": "system", "content": _ASSET_TEXT_PROMPT},
             {"role": "user", "content": f"File: {filename}\n\n{text[:30000]}"},
@@ -179,7 +182,7 @@ def _analyze_pdf(client: AzureOpenAI, deployment: str, filename: str, content: b
     return response.choices[0].message.content
 
 
-def _analyze_image(client: AzureOpenAI, deployment: str, filename: str, content: bytes) -> str:
+def _analyze_image(client: OpenAI, deployment: str, filename: str, content: bytes) -> str:
     lower = filename.lower()
     mime = (
         "image/jpeg"
@@ -193,7 +196,7 @@ def _analyze_image(client: AzureOpenAI, deployment: str, filename: str, content:
     b64 = base64.b64encode(content).decode()
     response = _chat_with_retry(client, 
         model=deployment,
-        max_completion_tokens=400,
+        max_tokens=400,
         messages=[
             {"role": "system", "content": _ASSET_IMAGE_PROMPT},
             {
@@ -235,7 +238,7 @@ def analyze_files(files: Iterable[tuple[str, bytes]]) -> dict:
         try:
             response = _chat_with_retry(client, 
                 model=deployment,
-                max_completion_tokens=300,
+                max_tokens=300,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": _music_recommendations_prompt()},

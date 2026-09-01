@@ -390,15 +390,14 @@
         </div>
       </div>
       <div>
-        <label class="lbl mb-2">Labels</label>
-        <p class="text-xs text-[var(--muted)] mb-2">Click to <span class="font-semibold" style="color:#10B981">include</span> · Double-click to <span class="font-semibold" style="color:var(--red)">exclude</span> · Click again to clear</p>
+        <label class="lbl mb-2">Music Libraries</label>
+        <p class="text-xs text-[var(--muted)] mb-2">All libraries are on by default. Click to turn one <span class="font-semibold" style="color:var(--red)">off</span> or back <span class="font-semibold" style="color:#10B981">on</span>.</p>
         <div class="flex flex-wrap gap-2">
-          <template x-for="a in Object.keys(LABEL_CODES)" :key="a">
+          <template x-for="a in ALL_LIBRARIES" :key="a">
             <button type="button"
-              @click="handleStepLabelClick(a)"
-              @dblclick="handleStepLabelDblClick(a)"
-              :class="labelState(a)==='include'?'genre-btn active-include':labelState(a)==='exclude'?'genre-btn active-exclude':'genre-btn'"
-              x-text="(labelState(a)==='include'?'✓ ':labelState(a)==='exclude'?'✕ ':'')+labelDisplay(a)"></button>
+              @click="toggleLibrary(a)"
+              :class="libSelected(a)?'genre-btn active-include':'genre-btn'"
+              x-text="(libSelected(a)?'✓ ':'')+labelDisplay(a)"></button>
           </template>
         </div>
       </div>
@@ -437,6 +436,7 @@
         <div class="review-row"><span class="review-label">Assets</span><span class="review-val" x-text="uploadedFiles.length?uploadedFiles.length+' file(s)':'None'"></span></div>
         <div class="review-row"><span class="review-label">Include Genres</span><span class="review-val" x-text="form.include_genres.join(', ')||'None'"></span></div>
         <div class="review-row"><span class="review-label">Exclude Genres</span><span class="review-val" x-text="form.exclude_genres.join(', ')||'None'"></span></div>
+        <div class="review-row"><span class="review-label">Libraries</span><span class="review-val" x-text="_libs(form).join(', ')"></span></div>
         <div class="review-row"><span class="review-label">Explicit Filter</span><span class="review-val" x-text="form.filter_explicit?'On':'Off'"></span></div>
       </div>
       <div class="flex justify-between pt-2">
@@ -560,15 +560,14 @@
         </div>
       </div>
       <div class="mb-4">
-        <label class="lbl mb-2">Labels</label>
-        <p class="text-xs text-[var(--muted)] mb-2">Click to <span style="color:#10B981" class="font-semibold">include</span> · Double-click to <span style="color:var(--red)" class="font-semibold">exclude</span> · Click again to clear</p>
+        <label class="lbl mb-2">Music Libraries</label>
+        <p class="text-xs text-[var(--muted)] mb-2">All libraries are on by default. Click to turn one <span style="color:var(--red)" class="font-semibold">off</span> or back <span style="color:#10B981" class="font-semibold">on</span>. Save to apply to the next playlist.</p>
         <div class="flex flex-wrap gap-2">
-          <template x-for="a in Object.keys(LABEL_CODES)" :key="a">
+          <template x-for="a in ALL_LIBRARIES" :key="a">
             <button type="button"
-              @click="handleSbLabelClick(a)"
-              @dblclick="handleSbLabelDblClick(a)"
-              :class="sbLabelExcluded(a)?'genre-btn active-exclude':(sbLabelIncluded(a)?'genre-btn active-include':'genre-btn')"
-              x-text="(sbLabelIncluded(a)?'✓ ':sbLabelExcluded(a)?'✕ ':'')+labelDisplay(a)"></button>
+              @click="toggleLibrary(a, curBrand)"
+              :class="libSelected(a, curBrand)?'genre-btn active-include':'genre-btn'"
+              x-text="(libSelected(a, curBrand)?'✓ ':'')+labelDisplay(a)"></button>
           </template>
         </div>
       </div>
@@ -801,7 +800,7 @@
         <template x-for="s in catalogSongs" :key="s.id">
           <div class="tr catalog-track-row" style="grid-template-columns:1fr 150px 110px 55px 55px 55px 55px;cursor:default">
             <span class="text-xs font-medium truncate" x-text="(s.title||s.name||'—').split('_')[0].trim()"></span>
-            <span class="text-xs text-[var(--faint)] truncate" x-text="s.artist||'—'"></span>
+            <span class="text-xs text-[var(--faint)] truncate" x-text="s.library||'—'"></span>
             <span class="text-xs text-[var(--faint)] truncate" x-text="s.genre||'—'"></span>
             <span class="text-xs text-right text-[var(--faint)]" x-text="Math.round(s.tempo_bpm||s.tempo||0)||'—'"></span>
             <span class="text-xs text-right" x-text="(s.energy||0).toFixed(2)"></span>
@@ -977,6 +976,15 @@
   </div>
 </div>
 
+<!-- ══════════ SUGGEST SIMILAR LOADING ══════════ -->
+<div x-show="suggestingTrack !== null" class="modal-bg" x-cloak style="z-index:110">
+  <div style="background:#fff;border-radius:16px;padding:36px 40px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2);min-width:260px">
+    <div class="gen-spinner mx-auto mb-4"></div>
+    <div style="font-family:var(--font-heading);font-size:16px;font-weight:700;color:var(--txt)">Finding similar songs…</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Matching audio embeddings</div>
+  </div>
+</div>
+
 <!-- ══════════ SUGGEST SIMILAR SONGS MODAL ══════════ -->
 <div x-show="pendingSuggestions !== null" class="modal-bg" x-cloak @click.self="dismissSuggestions()" style="z-index:110">
   <div style="background:#fff;border-radius:16px;width:500px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.2)">
@@ -1010,7 +1018,7 @@
           <!-- Title + artist -->
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)" x-text="s.title||'Unknown'"></div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="s.artist||'—'"></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="s.library||'—'"></div>
           </div>
 
           <!-- Tags: genre pill · BPM · BFS -->
@@ -1051,7 +1059,7 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=33"></script>
+<script src="/static/app.js?v=34"></script>
 </body>
 </html>
 

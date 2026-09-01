@@ -1,5 +1,5 @@
 """
-brand_analysis.py — Azure OpenAI Call 1: brand inputs → Brand Profile JSON
+brand_analysis.py — OpenRouter Call 1: brand inputs → Brand Profile JSON
 
 Outputs a Brand Profile dict with Aaker personality scores, music baselines,
 aesthetics, customer profile, and genre recommendations.
@@ -10,7 +10,7 @@ import logging
 import os
 import time
 
-from openai import AzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
+from openai import OpenAI, RateLimitError, AuthenticationError, APIConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -100,17 +100,17 @@ def _build_user_prompt(inputs: dict) -> str:
 
 def get_brand_profile(
     inputs: dict,
-    chat_client: AzureOpenAI,
+    chat_client: OpenAI,
     deployment: str,
     max_retries: int = 3,
 ) -> dict:
     """
-    Call Azure OpenAI to produce a Brand Profile JSON from collected user inputs.
+    Call OpenRouter to produce a Brand Profile JSON from collected user inputs.
 
     Args:
         inputs:       Dict of all collected terminal prompt values.
-        chat_client:  Configured AzureOpenAI client.
-        deployment:   Chat model deployment name (e.g. "gpt-4o").
+        chat_client:  Configured OpenRouter (OpenAI-compatible) client.
+        deployment:   Model id (e.g. "openai/gpt-4o-mini").
         max_retries:  Max retry attempts on rate-limit errors.
 
     Returns:
@@ -122,7 +122,7 @@ def get_brand_profile(
         try:
             response = chat_client.chat.completions.create(
                 model=deployment,
-                max_completion_tokens=2000,
+                max_tokens=2000,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -145,7 +145,7 @@ def get_brand_profile(
                 if attempt == max_retries:
                     raise RuntimeError(
                         "Failed to parse Brand Profile JSON after "
-                        f"{max_retries} attempts. See azure_openai_debug.log."
+                        f"{max_retries} attempts. See openrouter_debug.log."
                     ) from e
                 continue
 
@@ -155,11 +155,11 @@ def get_brand_profile(
             time.sleep(wait)
 
         except AuthenticationError:
-            print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
+            print("[ERROR] Invalid OpenRouter credentials — check OPENROUTER_API_KEY in .env")
             raise
 
         except APIConnectionError:
-            print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
+            print("[ERROR] Cannot reach OpenRouter — check network / OPENROUTER_BASE_URL in .env")
             raise
 
     raise RuntimeError("Brand Profile generation failed after all retries.")
@@ -167,7 +167,7 @@ def get_brand_profile(
 
 def _log_to_debug_file(content: str, tag: str) -> None:
     try:
-        with open("azure_openai_debug.log", "a", encoding="utf-8") as f:
+        with open("openrouter_debug.log", "a", encoding="utf-8") as f:
             f.write(f"\n=== {tag} ===\n{content}\n")
     except Exception:
         pass

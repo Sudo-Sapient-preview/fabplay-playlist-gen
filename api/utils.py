@@ -19,17 +19,24 @@ def err(message: str, status: int = 400, **extra) -> JsonResponse:
 
 
 def resolve_track_src(track: dict) -> str:
+    """Build a playable absolute URL for a track.
+
+    Catalog rows store a bare storage object key (e.g. ``1.mp3``) inside the
+    public Supabase ``songs`` bucket, so the configured base URL is prefixed.
+    """
     raw = str(track.get("url") or track.get("src") or "").strip()
     if not raw:
         return ""
     if raw.startswith(("http://", "https://", "data:", "blob:")):
         return raw
+    if raw.startswith("supabase://"):
+        # supabase://songs/1.mp3 -> 1.mp3
+        raw = raw[len("supabase://") :].split("/", 1)[-1]
     rel = raw.lstrip("/")
-    if settings.SONGS_BASE_URL:
-        return f"{settings.SONGS_BASE_URL}/{rel}"
     if rel.startswith("songs/"):
         rel = rel[len("songs/") :]
-    return f"/songs/{rel}"
+    base = settings.SONGS_BASE_URL
+    return f"{base}/{rel}" if base else f"/songs/{rel}"
 
 
 def time_ago(ts: str) -> str:
@@ -52,11 +59,11 @@ def fmt_track(track: dict) -> dict:
     return {
         "song_id": track.get("song_id", track.get("id", "")),
         "title": track.get("title", ""),
-        "artist": track.get("artist", ""),
+        "library": track.get("library", ""),
         "genre": track.get("genre", ""),
         "song_type": track.get("song_type", ""),
-        "url": track.get("url", ""),
-        "src": track.get("url") or track.get("src", ""),
+        "url": resolve_track_src(track),
+        "src": resolve_track_src(track),
         "bpm": round(float(track.get("tempo_bpm", 120))),
         "bfs": round(
             float(track.get("relevance_score", track.get("mmr_score", 0.5))),
@@ -129,8 +136,7 @@ def fmt_daypart(day_part: dict, playlist: list[dict]) -> dict:
 def pipeline_inputs(brand: dict) -> dict:
     include_genres = brand.get("include_genres", [])
     exclude_genres = brand.get("exclude_genres", [])
-    include_artists = brand.get("include_artists", [])
-    exclude_artists = brand.get("exclude_artists", [])
+    libraries = brand.get("libraries", [])
 
     def as_str(value):
         if isinstance(value, list):
@@ -149,8 +155,7 @@ def pipeline_inputs(brand: dict) -> dict:
         "lifestyle_tags": brand.get("lifestyle_tags", []),
         "include_genres": as_str(include_genres),
         "exclude_genres": as_str(exclude_genres),
-        "include_artists": as_str(include_artists),
-        "exclude_artists": as_str(exclude_artists),
+        "libraries": list(libraries) if isinstance(libraries, list) else [],
         "filter_explicit": brand.get("filter_explicit", True),
         "music_notes": brand.get("music_notes", ""),
         "asset_analysis": brand.get("asset_analysis", ""),

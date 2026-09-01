@@ -6,7 +6,7 @@ from typing import Any, Callable, Iterable
 from brand_pipeline.day_part_templates import DAY_PART_TEMPLATES
 
 from api.activity import log_activity
-from api.db import get_supabase
+from api.db import ALL_LIBRARIES, get_supabase
 from api.store import (
     delete_brand as store_delete_brand,
     get_brand,
@@ -30,7 +30,8 @@ _BRAND_DEFAULTS: dict[str, Any] = {
     "age_min": 18, "age_max": 65,
     "lifestyle_tags": [], "visitor_activity": [],
     "include_genres": [], "exclude_genres": [],
-    "include_artists": [], "exclude_artists": [],
+    # All libraries are enabled by default; the user may narrow this per brand.
+    "libraries": list(ALL_LIBRARIES),
     "filter_explicit": True, "music_notes": "", "asset_analysis": "",
     "has_brand_guidelines": False,
     "include_song_types": "all",
@@ -231,7 +232,14 @@ def update_profile(brand_id: str, user_id: str, payload: dict) -> Result:
     return _mutate(brand_id, user_id, apply)
 
 
-def update_genres(brand_id: str, user_id: str, include_genres, exclude_genres, include_song_types=None, include_artists=None, exclude_artists=None) -> Result:
+def update_genres(
+    brand_id: str,
+    user_id: str,
+    include_genres,
+    exclude_genres,
+    include_song_types=None,
+    libraries=None,
+) -> Result:
     def apply(brand: dict) -> None:
         if include_genres is not None:
             brand["include_genres"] = list(include_genres)
@@ -239,9 +247,10 @@ def update_genres(brand_id: str, user_id: str, include_genres, exclude_genres, i
             brand["exclude_genres"] = list(exclude_genres)
         if include_song_types is not None:
             brand["include_song_types"] = include_song_types
-        if include_artists is not None:
-            brand["include_artists"] = list(include_artists)
-        if exclude_artists is not None:
-            brand["exclude_artists"] = list(exclude_artists)
+        if libraries is not None:
+            valid = {lib.lower(): lib for lib in ALL_LIBRARIES}
+            chosen = [valid[str(x).strip().lower()] for x in libraries if str(x).strip().lower() in valid]
+            # Never leave a brand with zero libraries — fall back to all.
+            brand["libraries"] = chosen or list(ALL_LIBRARIES)
 
     return _mutate(brand_id, user_id, apply)

@@ -1,5 +1,5 @@
 """
-sound_board.py — Azure OpenAI Call 2: Brand Profile + day-part templates → Sound Board JSON
+sound_board.py — OpenRouter Call 2: Brand Profile + day-part templates → Sound Board JSON
 
 Produces per-day-part audio targets (energy, valence, tempo, danceability,
 acousticness, instrumentalness, genre_emphasis, character_description).
@@ -9,7 +9,7 @@ import json
 import logging
 import time
 
-from openai import AzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
+from openai import OpenAI, RateLimitError, AuthenticationError, APIConnectionError
 
 from brand_pipeline.day_part_templates import DAY_PART_TEMPLATES
 
@@ -121,18 +121,18 @@ def _build_user_prompt(brand_profile: dict, category: str, music_notes: str = ""
 def get_sound_board(
     brand_profile: dict,
     category: str,
-    chat_client: AzureOpenAI,
+    chat_client: OpenAI,
     deployment: str,
     max_retries: int = 3,
     music_notes: str = "",
 ) -> dict:
     """
-    Call Azure OpenAI to produce a Sound Board JSON from the Brand Profile.
+    Call OpenRouter to produce a Sound Board JSON from the Brand Profile.
 
     Args:
         brand_profile: Parsed Brand Profile dict from Call 1.
         category:      Business category string (e.g. "cafe").
-        chat_client:   Configured AzureOpenAI client.
+        chat_client:   Configured OpenRouter (OpenAI-compatible) client.
         deployment:    Chat model deployment name.
         max_retries:   Max retry attempts on rate-limit errors.
         music_notes:   Free-text instructions from the brand form (e.g. "upbeat after 6pm").
@@ -146,7 +146,7 @@ def get_sound_board(
         try:
             response = chat_client.chat.completions.create(
                 model=deployment,
-                max_completion_tokens=2000,
+                max_tokens=2000,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -167,7 +167,7 @@ def get_sound_board(
                 if attempt == max_retries:
                     raise RuntimeError(
                         "Failed to parse Sound Board JSON after "
-                        f"{max_retries} attempts. See azure_openai_debug.log."
+                        f"{max_retries} attempts. See openrouter_debug.log."
                     ) from e
                 continue
 
@@ -183,11 +183,11 @@ def get_sound_board(
             time.sleep(wait)
 
         except AuthenticationError:
-            print("[ERROR] Invalid Azure OpenAI credentials — check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in .env")
+            print("[ERROR] Invalid OpenRouter credentials — check OPENROUTER_API_KEY in .env")
             raise
 
         except APIConnectionError:
-            print("[ERROR] Cannot reach Azure OpenAI endpoint — check AZURE_OPENAI_ENDPOINT in .env")
+            print("[ERROR] Cannot reach OpenRouter — check network / OPENROUTER_BASE_URL in .env")
             raise
 
     raise RuntimeError("Sound Board generation failed after all retries.")
@@ -281,7 +281,7 @@ def apply_segment_adjustments(sound_board: dict, segment: str) -> dict:
 
 def _log_to_debug_file(content: str, tag: str) -> None:
     try:
-        with open("azure_openai_debug.log", "a", encoding="utf-8") as f:
+        with open("openrouter_debug.log", "a", encoding="utf-8") as f:
             f.write(f"\n=== {tag} ===\n{content}\n")
     except Exception:
         pass

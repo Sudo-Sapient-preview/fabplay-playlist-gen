@@ -89,7 +89,7 @@ urlpatterns = [
         name="api-playlist-add-suggested-tracks",
     ),
     path("catalog/genres", catalog_views.genres, name="api-catalog-genres"),
-    path("catalog/artists", catalog_views.artists, name="api-catalog-artists"),
+    path("catalog/libraries", catalog_views.libraries, name="api-catalog-libraries"),
     path("catalog/stats", catalog_views.stats, name="api-catalog-stats"),
     path("catalog/songs", catalog_views.songs, name="api-catalog-songs"),
     path("debug/search", iam_views.debug_search, name="api-debug-search"),

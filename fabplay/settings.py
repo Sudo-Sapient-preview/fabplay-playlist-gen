@@ -108,7 +108,15 @@ USE_TZ = True
 APPEND_SLASH = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-SONGS_BASE_URL = os.getenv("SONGS_BASE_URL", "").strip().rstrip("/")
+# Audio is served from the public Supabase storage bucket. When SONGS_BASE_URL
+# is not set explicitly it is derived from SUPABASE_URL.
+SONGS_BUCKET = os.getenv("SONGS_BUCKET", "songs").strip()
+_songs_base = os.getenv("SONGS_BASE_URL", "").strip().rstrip("/")
+if not _songs_base:
+    _sb_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    if _sb_url:
+        _songs_base = f"{_sb_url}/storage/v1/object/public/{SONGS_BUCKET}"
+SONGS_BASE_URL = _songs_base
 SONGS_DIR = os.getenv("SONGS_DIR", str(BASE_DIR.parent / "songs"))
 
 USE_X_FORWARDED_HOST = _env_bool("DJANGO_USE_X_FORWARDED_HOST", not DEBUG)

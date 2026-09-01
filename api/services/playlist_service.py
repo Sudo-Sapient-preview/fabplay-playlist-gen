@@ -251,8 +251,25 @@ def suggest_tracks(brand_id: str, user_id: str, day_part_index: int, song_id: st
     if not candidates:
         return None, "No suggestions available", 404
 
-    pre_ranked = sorted(candidates, key=lambda c: compute_maest_sim(c, query_song), reverse=True)
-    top_candidates = pre_ranked[:200]
+    # Fast shortlist first (cheap feature distance + same-genre boost), THEN
+    # fetch MAEST only for that shortlist. Do NOT call fetch_all_clap_features()
+    # here — cold-loading 40k vectors blocks the request for ~2 minutes and
+    # makes the suggest icon look dead.
+    query_genre = str(query_song.get("genre") or "").strip().lower()
+
+    def _shortlist_score(candidate: dict) -> float:
+        score = compute_maest_sim(candidate, query_song)  # feature fallback until MAEST attached
+        cand_genre = str(candidate.get("genre") or "").strip().lower()
+        if query_genre and cand_genre and (
+            query_genre == cand_genre
+            or query_genre in cand_genre
+            or cand_genre in query_genre
+        ):
+            score += 0.05
+        return score
+
+    pre_ranked = sorted(candidates, key=_shortlist_score, reverse=True)
+    top_candidates = pre_ranked[:300]
 
     analysis_ids = [s["song_id"] for s in top_candidates] + [song_id]
     analysis = _fetch_analysis_features(analysis_ids, include_maest=True)
@@ -266,14 +283,20 @@ def suggest_tracks(brand_id: str, user_id: str, day_part_index: int, song_id: st
                 query_song["clap_audio_512"] = q_feat["clap_audio_512"]
             # arousal and mood_predicted_labels come from songs table, already on query_song
 
-    final_ranked = sorted(top_candidates, key=lambda c: compute_maest_sim(c, query_song), reverse=True)
+    # Keep only candidates that actually got an audio embedding; otherwise the
+    # final sort would again collapse to feature distance.
+    embedded = [s for s in top_candidates if s.get("maest_audio_768") or s.get("clap_audio_512")]
+    rank_pool = embedded or top_candidates
+    final_ranked = sorted(rank_pool, key=lambda c: compute_maest_sim(c, query_song), reverse=True)
     top = final_ranked[:top_k]
 
     new_tracks = []
     for song in top:
-        song["relevance_score"] = compute_maest_sim(song, query_song)
+        score = compute_maest_sim(song, query_song)
+        song["relevance_score"] = score
         track = fmt_track(song)
         track["suggested"] = True
+        track["relevance_score"] = round(float(score), 4)
         track["src"] = resolve_track_src(track)
         new_tracks.append(track)
 

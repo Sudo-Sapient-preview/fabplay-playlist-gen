@@ -12,6 +12,7 @@ from pipeline.mmr_scorer import mmr_select
 from pipeline.rag_retriever import (
     fetch_must_include_genre_tracks,
     fetch_must_include_tracks,
+    preferred_genres,
     retrieve_candidates,
 )
 
@@ -196,10 +197,14 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
         inputs = _apply_genre_overrides(pipeline_inputs(brand), genre_overrides)
         day_parts = sound_board_result.get("day_parts", [])
 
-        include_artists = [item.strip() for item in (inputs.get("include_artists") or "").split(",") if item.strip()]
+        libraries = list(inputs.get("libraries") or [])
         include_genres = [item.strip() for item in (genre_overrides or {}).get("include", []) if item.strip()]
         if include_genres:
             task_log(task_id, f"  Genre overrides (include): {', '.join(include_genres)}")
+        task_log(
+            task_id,
+            "  Libraries: " + (", ".join(libraries) if libraries else "all"),
+        )
 
         assembled: list[dict] = []
         total_parts = max(len(day_parts), 1)
@@ -227,13 +232,19 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
             fresh_candidates = [candidate for candidate in candidates if candidate.get("song_id") not in used_song_ids]
             if len(fresh_candidates) >= 5:
                 candidates = fresh_candidates
-                task_log(task_id, f"  {day_part_name}: {len(candidates)} fresh candidates after cross-part dedup")
+                task_log(
+                    task_id,
+                    f"  {day_part_name}: scoring {len(candidates)} / {stats.get('catalog_size', len(all_playable))} "
+                    f"catalog songs for best brand fit",
+                )
             else:
                 task_log(task_id, f"  {day_part_name}: catalog too small for full dedup, reusing pool")
 
             target_count = target_track_count(day_part)
-            must_include = fetch_must_include_tracks(include_artists, candidates, target_count)
-            genre_injections = fetch_must_include_genre_tracks(include_genres, candidates, target_count)
+            must_include = fetch_must_include_tracks([], candidates, target_count)
+            genre_injections = fetch_must_include_genre_tracks(
+                include_genres, candidates, target_count, libraries=libraries
+            )
 
             if genre_injections:
                 task_log(
@@ -252,12 +263,15 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
 
             must_include = list({track.get("song_id"): track for track in must_include + genre_injections}.values())
             target_seconds = get_day_part_hours(day_part) * 3600 * 1.25
+            # Full-catalog mode: candidates already cover all_playable, so spillover
+            # is only useful when MAX_CANDIDATES truncates the pool.
             candidate_ids = {track.get("song_id") for track in candidates}
             spillover = [
                 track
                 for track in all_playable
                 if track.get("song_id") not in candidate_ids and track.get("song_id") not in used_song_ids
             ]
+            preferred = preferred_genres(day_part, inputs, brand_profile)
 
             playlist = mmr_select(
                 candidates=candidates,
@@ -267,6 +281,7 @@ def _bg_playlist(brand_id: str, task_id: str, genre_overrides: dict | None = Non
                 target_seconds=target_seconds,
                 lam=MMR_LAMBDA,
                 spillover=spillover,
+                preferred_genres=preferred,
             )
 
             for track in playlist:

@@ -4,9 +4,9 @@ import os
 import httpx
 from django.views.decorators.http import require_GET, require_http_methods
 
-from api.db import get_supabase
+from api.db import CATALOG_VIEW, as_count, count_catalog, get_supabase, library_counts
 from api.auth import require_superadmin
-from api.utils import err, ok
+from api.utils import err, ok, resolve_track_src
 
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -16,41 +16,56 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 @require_GET
 @require_superadmin
 def debug_search(_request):
+    """Report catalog health.
+
+    Retrieval is feature/MMR based; there is no pgvector RPC in this deployment.
+    """
     try:
-        zero_vec = "[" + ",".join(["0.0"] * 1536) + "]"
-        result = get_supabase().rpc(
-            "search_songs_by_embedding",
-            {"query_embedding": zero_vec, "match_count": 5, "min_similarity": 0.0},
-        ).execute()
-        error = getattr(result, "error", None)
-        rows = result.data or []
+        total = count_catalog()
+        embedded = as_count(
+            get_supabase()
+            .table("analysis_song_features")
+            .select("song_id", count="exact")
+            .not_.is_("clap_audio_512", "null")
+            .limit(1)
+            .execute()
+            .count
+        )
         return ok(
             {
-                "rpc_exists": True,
-                "error": str(error) if error else None,
-                "rows_returned": len(rows),
-                "sample": rows[:2],
-                "song_embeddings_count": get_supabase()
-                .table("song_embeddings")
-                .select("id", count="exact")
-                .execute()
-                .count,
+                "retrieval": "mmr_features",
+                "catalog_view": CATALOG_VIEW,
+                "total_songs": total,
+                "libraries": library_counts(),
+                "songs_with_clap_vectors": embedded,
             }
         )
     except Exception as exc:
-        return ok({"rpc_exists": False, "error": str(exc)})
+        return ok({"error": str(exc)})
 
 
 @require_GET
 @require_superadmin
 def debug_songs(_request):
     try:
-        response = get_supabase().table("songs").select("id,title,artist,url").limit(3).execute()
+        response = (
+            get_supabase()
+            .table(CATALOG_VIEW)
+            .select("id,title,library,genre,url")
+            .limit(3)
+            .execute()
+        )
         sample = [
-            {"id": song["id"], "title": song.get("title", ""), "url": song.get("url", "")}
+            {
+                "id": song["id"],
+                "title": song.get("title", ""),
+                "library": song.get("library", ""),
+                "genre": song.get("genre", ""),
+                "url": resolve_track_src(song),
+            }
             for song in (response.data or [])
         ]
-        total = get_supabase().table("songs").select("id", count="exact").execute().count or 0
+        total = count_catalog()
     except Exception as exc:
         return ok({"error": str(exc)})
     return ok({"total_songs": total, "sample": sample})

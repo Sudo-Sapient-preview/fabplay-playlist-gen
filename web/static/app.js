@@ -49,10 +49,9 @@ return {
   sbSongType: 'all',
   sbShowAddGenre: false,
   _sbGenreClickTimers: {},
-  _sbLabelClickTimers: {},
   _stepGenreClickTimers: {},
-  _stepLabelClickTimers: {},
-  LABEL_CODES: {'Amorco': 'AMU', 'FAPLA Originals': 'FPO'},
+  LABEL_CODES: {'Amurco': 'AMU', 'Epic': 'EPIC', 'Fabplay Originals': 'FPO'},
+  ALL_LIBRARIES: ['Amurco', 'Epic', 'Fabplay Originals'],
   hasUnsavedChanges: false,
   sbAcousticDirty: false,
   sbGenreDirty: false,
@@ -96,7 +95,7 @@ return {
   plGenreFilter: '',
   plLoading: false,
 
-  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:'',include_song_types:'all'},
+  form: {brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],libraries:['Amurco','Epic','Fabplay Originals'],filter_explicit:true,music_notes:'',include_song_types:'all'},
 
   cats: [
     {v:'fashion_footwear',l:'👗 Fashion & Footwear'},
@@ -117,11 +116,12 @@ return {
     {v:'luxury',l:'Luxury',d:'Ultra-premium'}
   ],
 
-  allGenres: ['Blues','Classical','Country','Electronic','Hip Hop','Jazz','Latin','Other','Pop','Reggae','Rock','Soul/Funk'],
+  // Fallback only — UI prefers catalogGenres loaded from /api/catalog/genres.
+  allGenres: ['Classical','EDM','Hip Hop','Indi Pop','Jazz','Pop','Rock','Traditional Folk'],
   catalogGenres: [], // loaded from DB — falls back to allGenres if empty
   catalogGenresLoaded: false,
-  catalogArtists: [],
-  catalogArtistsLoaded: false,
+  catalogLibraries: [],
+  catalogLibrariesLoaded: false,
 
   spParams: [
     {k:'energy_target',l:'Energy',c:'#EF4444',fmt:v=>v.toFixed(2),pct:v=>v*100},
@@ -236,7 +236,15 @@ return {
   async loadActivity(){ try{ const r=await this.apiFetch('/api/activity'); if(r&&r.ok)this.activity=await r.json() }catch(e){} },
   async loadCatalogStats(){ try{ const r=await this.apiFetch('/api/catalog/stats'); if(r&&r.ok)this.catalogStats=await r.json() }catch(e){} },
   _fmtGenre(g){
-    const map={'hip_hop':'Hip Hop','soul_funk':'Soul/Funk','r_b':'R&B'};
+    const map={
+      hip_hop:'Hip Hop',
+      soul_funk:'Soul/Funk',
+      r_b:'R&B',
+      indi_pop:'Indi Pop',
+      traditional_folk:'Traditional Folk',
+      edm:'EDM',
+      christian_devotional:'Christian Devotional',
+    };
     return map[g]||g.split(/[_\s]+/).map(w=>w?w[0].toUpperCase()+w.slice(1):'').join(' ');
   },
   async loadCatalogGenres(){
@@ -257,24 +265,46 @@ return {
       }
     }catch(e){}
   },
-  async loadCatalogArtists(){
+  async loadCatalogLibraries(){
+    // Libraries replace the old artist dimension (the catalog has no artists).
     try{
-      const r=await this.apiFetch('/api/catalog/artists');
+      const r=await this.apiFetch('/api/catalog/libraries');
       if(r&&r.ok){
         const d=await r.json();
-        this.catalogArtists=(d.artists||[]).map(a=>(a||'').trim()).filter(Boolean).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
-        this.catalogArtistsLoaded=true;
+        const names=(d.libraries||[]).map(l=>(l&&l.name||'').trim()).filter(Boolean);
+        this.catalogLibraries=names.length?names:[...this.ALL_LIBRARIES];
+        this.catalogLibrariesLoaded=true;
       }
-    }catch(e){}
+    }catch(e){
+      this.catalogLibraries=[...this.ALL_LIBRARIES];
+    }
   },
 
   openBrandSmart(id){
     this.openBrandDetail(id);
   },
 
-  labelDisplay(artist){
-    const code=this.LABEL_CODES[artist];
-    return code?`${artist} (${code})`:artist;
+  labelDisplay(library){
+    const code=this.LABEL_CODES[library];
+    return code?`${library} (${code})`:library;
+  },
+
+  // ---- Library selection (all enabled by default) ----
+  _libs(target){
+    const cur=(target&&target.libraries);
+    return Array.isArray(cur)&&cur.length?cur:[...this.ALL_LIBRARIES];
+  },
+  libSelected(lib, target){
+    return this._libs(target||this.form).some(x=>String(x).toLowerCase()===String(lib).toLowerCase());
+  },
+  toggleLibrary(lib, target){
+    const obj=target||this.form;
+    let libs=this._libs(obj).slice();
+    const i=libs.findIndex(x=>String(x).toLowerCase()===String(lib).toLowerCase());
+    if(i>=0){ libs.splice(i,1); } else { libs.push(lib); }
+    // Never allow an empty selection - fall back to all libraries.
+    if(!libs.length) libs=[...this.ALL_LIBRARIES];
+    obj.libraries=libs;
   },
 
   async openBrandDetail(id){
@@ -496,7 +526,7 @@ return {
       // If website was scraped, apply music recs and store asset analysis
       if(s.asset_analysis&&!this.assetAnalysis)this.assetAnalysis=s.asset_analysis;
       if(!this.catalogGenresLoaded) await this.loadCatalogGenres();
-      if(!this.catalogArtistsLoaded) this.loadCatalogArtists();
+      if(!this.catalogLibrariesLoaded) this.loadCatalogLibraries();
       const knownGenres=this.genres;const knownLower=knownGenres.map(g=>g.toLowerCase());
       if(s.recommended_genres?.length){s.recommended_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.include_genres.includes(m)&&!this.form.exclude_genres.includes(m))this.form.include_genres.push(m)})}
       if(s.avoid_genres?.length){s.avoid_genres.forEach(g=>{const idx=knownLower.indexOf(g.toLowerCase());const m=idx>=0?knownGenres[idx]:null;if(m&&!this.form.exclude_genres.includes(m)&&!this.form.include_genres.includes(m))this.form.exclude_genres.push(m)})}
@@ -540,14 +570,6 @@ return {
 
   toggleGenre(field,genre,target){const arr=target[field];const idx=arr.indexOf(genre);if(idx>=0)arr.splice(idx,1);else arr.push(genre)},
   toggleChip(arr,v){const i=arr.indexOf(v);if(i>=0)arr.splice(i,1);else arr.push(v)},
-  toggleArtist(field, artist){
-    const other=field==='include_artists'?'exclude_artists':'include_artists';
-    this.form[other]=this.form[other].filter(a=>a!==artist);
-    const arr=this.form[field];
-    const idx=arr.indexOf(artist);
-    if(idx>=0)arr.splice(idx,1);else arr.push(artist);
-  },
-
   async submitBrand(){
     this.submitting=true;
     try{
@@ -573,7 +595,7 @@ return {
 
   _resetForm(){
     this.createStep=0;
-    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],include_artists:[],exclude_artists:[],filter_explicit:true,music_notes:'',include_song_types:'all'};
+    this.form={brand_name:'',category:'',visitor_activity:[],website_url:'',brand_description:'',customer_description:'',customer_types:[],customer_segment:'mid_range',age_min:18,age_max:65,lifestyle_tags:[],include_genres:[],exclude_genres:[],libraries:['Amurco','Epic','Fabplay Originals'],filter_explicit:true,music_notes:'',include_song_types:'all'};
     this.suggestions={activities:[],lifestyle:[],customer_types:[]};
     this.uploadedFiles=[];
     this.assetAnalysis='';
@@ -963,7 +985,7 @@ return {
     const newInc=[...new Set([...baseInc.filter(g=>!this.sbGenreOverrides.exclude.includes(g)),...this.sbGenreOverrides.include])];
     const newExc=[...new Set([...baseExc.filter(g=>!this.sbGenreOverrides.include.includes(g)),...this.sbGenreOverrides.exclude])];
     try{
-      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,include_song_types:this.sbSongType,include_artists:this.curBrand?.include_artists||[],exclude_artists:this.curBrand?.exclude_artists||[]})});
+      await this.apiFetch('/api/brands/'+this.curBrand.id+'/genres',{method:'PUT',body:JSON.stringify({include_genres:newInc,exclude_genres:newExc,include_song_types:this.sbSongType,libraries:this._libs(this.curBrand)})});
       await this.loadBrands();
       const latest=this.brands.find(x=>x.id===this.curBrand.id);
       if(latest)this.curBrand=latest;
@@ -1086,67 +1108,7 @@ return {
     this._saveGenreOverrides();
   },
 
-  // ── Label (AMU/FPO) state — soundboard ────────
-  sbLabelIncluded(a){return(this.curBrand?.include_artists||[]).map(x=>x.toLowerCase()).includes(a.toLowerCase());},
-  sbLabelExcluded(a){return(this.curBrand?.exclude_artists||[]).map(x=>x.toLowerCase()).includes(a.toLowerCase());},
-  handleSbLabelClick(a){
-    if(this._sbLabelClickTimers[a])return;
-    this._sbLabelClickTimers[a]=setTimeout(()=>{
-      delete this._sbLabelClickTimers[a];
-      this.sbGenreDirty=true;
-      if(this.sbLabelExcluded(a)){
-        if(this.curBrand)this.curBrand.exclude_artists=(this.curBrand.exclude_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
-      }else if(this.sbLabelIncluded(a)){
-        if(this.curBrand)this.curBrand.include_artists=(this.curBrand.include_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
-      }else{
-        if(this.curBrand){if(!this.curBrand.include_artists)this.curBrand.include_artists=[];this.curBrand.include_artists=[...this.curBrand.include_artists,a];}
-      }
-    },250);
-  },
-  handleSbLabelDblClick(a){
-    if(this._sbLabelClickTimers[a]){clearTimeout(this._sbLabelClickTimers[a]);delete this._sbLabelClickTimers[a];}
-    this.sbGenreDirty=true;
-    if(!this.curBrand)return;
-    if(this.sbLabelIncluded(a)){
-      this.curBrand.include_artists=(this.curBrand.include_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
-      if(!this.curBrand.exclude_artists)this.curBrand.exclude_artists=[];
-      this.curBrand.exclude_artists=[...this.curBrand.exclude_artists,a];
-    }else if(!this.sbLabelExcluded(a)){
-      if(!this.curBrand.exclude_artists)this.curBrand.exclude_artists=[];
-      this.curBrand.exclude_artists=[...this.curBrand.exclude_artists,a];
-    }else{
-      this.curBrand.exclude_artists=(this.curBrand.exclude_artists||[]).filter(x=>x.toLowerCase()!==a.toLowerCase());
-    }
-  },
-
-  // ── Label state — brand creation wizard ────────
-  labelState(a){
-    if(this.form.include_artists.includes(a))return 'include';
-    if(this.form.exclude_artists.includes(a))return 'exclude';
-    return 'neutral';
-  },
-  handleStepLabelClick(a){
-    if(this._stepLabelClickTimers[a])return;
-    this._stepLabelClickTimers[a]=setTimeout(()=>{
-      delete this._stepLabelClickTimers[a];
-      const state=this.labelState(a);
-      if(state==='exclude'){this.form.exclude_artists=this.form.exclude_artists.filter(x=>x!==a);}
-      else if(state==='include'){this.form.include_artists=this.form.include_artists.filter(x=>x!==a);}
-      else{this.form.include_artists=[...this.form.include_artists,a];}
-    },250);
-  },
-  handleStepLabelDblClick(a){
-    if(this._stepLabelClickTimers[a]){clearTimeout(this._stepLabelClickTimers[a]);delete this._stepLabelClickTimers[a];}
-    const state=this.labelState(a);
-    if(state==='include'){
-      this.form.include_artists=this.form.include_artists.filter(x=>x!==a);
-      this.form.exclude_artists=[...this.form.exclude_artists,a];
-    }else if(state==='neutral'){
-      this.form.exclude_artists=[...this.form.exclude_artists,a];
-    }else{
-      this.form.exclude_artists=this.form.exclude_artists.filter(x=>x!==a);
-    }
-  },
+  // Library selection lives in toggleLibrary()/libSelected() above.
 
   dpColor(i){return['#6366F1','#10B981','#06B6D4','#F59E0B','#84CC16','#EC4899','#8B5CF6'][i%7]},
 
@@ -1528,14 +1490,14 @@ return {
     p.addEventListener('error',()=>{this.npTitle=(this.npTitle||'Track')+' (no file)';this.npPlaying=false});
   },
   playTrack(track,ti,dpIdx){
-    if(!track.src){this.npTitle=(track.title||'Unknown')+' — no audio file';this.npArtist=track.artist||'';this.npTrackKey=ti+'-'+dpIdx;return}
+    if(!track.src){this.npTitle=(track.title||'Unknown')+' — no audio file';this.npArtist=track.library||'';this.npTrackKey=ti+'-'+dpIdx;return}
     const dp=this.curPl?.day_parts?.[dpIdx];
     if(dp){this.npQueue=(dp.tracks||[]).map((t,i)=>({...t,_dpIdx:dpIdx,_ti:i}));this.npQueueIdx=ti}
     this._loadAndPlay(track,ti,dpIdx);
   },
   _loadAndPlay(track,ti,dpIdx){
     this.player.src=track.src||'';
-    this.npTitle=track.title||'Unknown';this.npArtist=track.artist||'';this.npTrackKey=ti+'-'+dpIdx;
+    this.npTitle=track.title||'Unknown';this.npArtist=track.library||'';this.npTrackKey=ti+'-'+dpIdx;
     this.player.play().catch(()=>{this.npTitle=(track.title||'Unknown')+' (no file)';this.npPlaying=false});
   },
   togglePlay(){if(!this.player.src)return;this.player.paused?this.player.play():this.player.pause()},
@@ -1577,7 +1539,7 @@ return {
       // If this track was playing, update the player to the replacement
       if(this.npTrackKey===ti+'-'+dpIdx){
         const rep=data.replacement;
-        if(rep?.src){this.player.src=rep.src;this.player.load();this.npTitle=rep.title||'';this.npArtist=rep.artist||''}
+        if(rep?.src){this.player.src=rep.src;this.player.load();this.npTitle=rep.title||'';this.npArtist=rep.library||''}
       }
     }catch(e){alert('Could not replace track: '+(e.message||'Please try again.'))}
     finally{this.replacingTrack=null}

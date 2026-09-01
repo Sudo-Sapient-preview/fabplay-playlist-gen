@@ -99,13 +99,13 @@ def get_mood_description(valence: float, energy: float) -> str:
 
 def build_track_embed_text(song: dict) -> str:
     """
-    Convert a song row (from Supabase songs table) into a structured
+    Convert a catalog row (from the catalog_songs view) into a structured
     natural-language string for embedding.
 
     Used by: embed_catalog.py (catalog embedding, one-time setup)
     """
     title            = song.get("title", "Unknown")
-    artist           = song.get("artist", "Unknown")
+    library          = song.get("library", "Unknown")
     genre            = song.get("genre", "Unknown")
     energy           = float(song.get("energy", 0.5))
     tempo_bpm        = float(song.get("tempo_bpm", 120))
@@ -118,7 +118,7 @@ def build_track_embed_text(song: dict) -> str:
     key              = song.get("key", "C")
 
     return (
-        f"Track: {title} by {artist}\n"
+        f"Track: {title} ({library})\n"
         f"Genre: {genre}\n"
         f"Energy: {get_energy_label(energy)} ({energy:.2f})\n"
         f"Tempo: {tempo_bpm:.0f} BPM — {get_tempo_label(tempo_bpm)}\n"
@@ -150,7 +150,7 @@ def build_query_embed_text(
     Used by: rag_retriever.py (query embedding, per day-part per run)
 
     Args:
-        brand_profile:    Parsed JSON from Azure OpenAI Call 1
+        brand_profile:    Parsed JSON from OpenRouter Call 1
         day_part_params:  One day-part dict from the Sound Board JSON (Call 2)
         day_part_template: Matching day-part template from day_part_templates.py
     """

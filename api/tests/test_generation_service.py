@@ -83,7 +83,7 @@ class GenerationServiceTests(SimpleTestCase):
         candidate = {
             "song_id": "song-1",
             "title": "Track 1",
-            "artist": "Artist 1",
+            "library": "Epic",
             "genre": "pop",
             "url": "songs/demo.mp3",
             "tempo_bpm": 108,

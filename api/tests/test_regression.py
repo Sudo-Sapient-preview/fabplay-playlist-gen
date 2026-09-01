@@ -198,7 +198,7 @@ class ApiRegressionTests(SimpleTestCase):
         ]
         mock_supabase.table.return_value.select.return_value.execute.return_value.count = 10
         mock_supabase.table.return_value.select.return_value.limit.return_value.execute.return_value.data = [
-            {"id": "song-1", "title": "Track 1", "artist": "Artist", "url": "songs/demo.mp3"}
+            {"id": "song-1", "title": "Track 1", "library": "Epic", "url": "songs/demo.mp3"}
         ]
         mock_supabase.rpc.return_value.execute.return_value.data = [{"id": "song-1"}]
         mock_catalog_supabase = MagicMock()
@@ -207,7 +207,7 @@ class ApiRegressionTests(SimpleTestCase):
             {
                 "id": "song-1",
                 "title": "Track 1",
-                "artist": "Artist",
+                "library": "Epic",
                 "genre": "pop",
                 "url": "songs/demo.mp3",
                 "tempo_bpm": 100,

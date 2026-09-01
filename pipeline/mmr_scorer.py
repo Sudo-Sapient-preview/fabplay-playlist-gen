@@ -143,7 +143,30 @@ def _cosine_similarity(a: list, b: list) -> float:
 
 # ─── Public scalar helpers (used by retriever for candidate sorting) ──────────
 
-def compute_relevance(track: dict, dp: dict) -> float:
+def _norm_genre_token(g: str) -> str:
+    return (g or "").lower().replace(" ", "_").replace("/", "_").replace("-", "_")
+
+
+def _genre_alignment(track: dict, preferred_genres: list[str] | None) -> float | None:
+    """Soft boost when the track genre matches brand/day-part preferred genres."""
+    if not preferred_genres:
+        return None
+    track_genre = _norm_genre_token(track.get("genre"))
+    if not track_genre:
+        return 0.0
+    prefs = [_norm_genre_token(g) for g in preferred_genres if g]
+    if not prefs:
+        return None
+    if any(p == track_genre or p in track_genre or track_genre in p for p in prefs):
+        return 1.0
+    return 0.0
+
+
+def compute_relevance(
+    track: dict,
+    dp: dict,
+    preferred_genres: list[str] | None = None,
+) -> float:
     scalar = float(max(0.0, 1.0 - math.sqrt(float(np.dot(
         (_track_vec(track) - _dp_vec(dp)) * _SW,
         (_track_vec(track) - _dp_vec(dp)) * _SW,
@@ -158,6 +181,10 @@ def compute_relevance(track: dict, dp: dict) -> float:
     labels = {m.lower() for m in (track.get("mood_predicted_labels") or [])}
     if labels:
         boosts.append(_mood_alignment(labels, dp))
+
+    genre_boost = _genre_alignment(track, preferred_genres)
+    if genre_boost is not None:
+        boosts.append(genre_boost)
 
     if not boosts:
         return scalar
@@ -238,19 +265,21 @@ def mmr_select(
     target_seconds: float,
     lam:            float = 0.7,
     spillover:      list[dict] | None = None,
+    preferred_genres: list[str] | None = None,
 ) -> list[dict]:
     """
     Numpy-vectorised MMR with incremental max_sim update.
 
     Diversity uses CLAP 512-dim cosine similarity when embeddings are available,
     falling back to weighted L2 on audio features otherwise.
-    Relevance uses compute_relevance() so arousal and mood labels are included.
+    Relevance uses compute_relevance() so arousal, mood, and preferred genres
+    are included. Pool is expected to be the full playable catalog.
     """
     must_ids = {t.get("song_id") for t in must_include}
 
-    # Gap 3: must-include tracks scored with full relevance (arousal + mood)
+    # Gap 3: must-include tracks scored with full relevance (arousal + mood + genre)
     for t in must_include:
-        rel = compute_relevance(t, dp)
+        rel = compute_relevance(t, dp, preferred_genres=preferred_genres)
         t["relevance_score"] = rel
         t["mmr_score"] = rel
     selected = list(must_include)
@@ -260,13 +289,16 @@ def mmr_select(
         return selected
 
     n = len(pool_tracks)
+    logger.info("MMR selecting from full pool of %d candidates (target=%d)", n, target_count)
 
     # Feature matrix (n × 6) — used as fallback when embeddings are absent
-    dv = _dp_vec(dp) * _SW
     M = np.stack([_track_vec(t) for t in pool_tracks]) * _SW   # (n, 6)
 
-    # Gap 2: relevance includes arousal + mood boosts, not just feature distance
-    rel_scores = np.array([compute_relevance(t, dp) for t in pool_tracks], dtype=np.float32)
+    # Gap 2: relevance includes arousal + mood + genre boosts
+    rel_scores = np.array(
+        [compute_relevance(t, dp, preferred_genres=preferred_genres) for t in pool_tracks],
+        dtype=np.float32,
+    )
 
     # Gap 1: CLAP embedding matrix for cosine-based diversity
     E_norm, has_emb = _build_emb_matrix(pool_tracks)
@@ -321,12 +353,15 @@ def mmr_select(
     if total_duration < target_seconds and spillover:
         selected_ids = {t.get("song_id") for t in selected}
         fill_pool = [t for t in spillover if t.get("song_id") not in selected_ids]
-        fill_pool.sort(key=lambda t: compute_relevance(t, dp), reverse=True)
+        fill_pool.sort(
+            key=lambda t: compute_relevance(t, dp, preferred_genres=preferred_genres),
+            reverse=True,
+        )
         for t in fill_pool:
             if total_duration >= target_seconds:
                 break
             t = dict(t)
-            t["relevance_score"] = compute_relevance(t, dp)
+            t["relevance_score"] = compute_relevance(t, dp, preferred_genres=preferred_genres)
             t["mmr_score"] = t["relevance_score"]
             selected.append(t)
             total_duration += float(t.get("duration_seconds", 210))

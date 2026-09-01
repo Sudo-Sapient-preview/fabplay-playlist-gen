@@ -16,3 +16,6 @@ data/playlists_store.json
 songs_manifest.json
 *.mp3
 /core
+
+# local safety backups (large audio)
+backups/

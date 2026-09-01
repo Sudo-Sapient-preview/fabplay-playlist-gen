@@ -8,9 +8,17 @@ For each day-part:
 """
 
 import logging
+import os
 import re
 
-from api.db import fetch_all_songs, fetch_songs_filtered, fetch_songs_by_artist, fetch_songs_by_genre, get_supabase
+from api.db import (
+    fetch_all_clap_features,
+    fetch_all_songs,
+    fetch_analysis_features,
+    fetch_songs_by_genre,
+    fetch_songs_filtered,
+    filter_by_library,
+)
 from pipeline.mmr_scorer import compute_relevance
 
 logger = logging.getLogger(__name__)
@@ -76,14 +84,13 @@ def _apply_hard_filters(
     Filter candidate tracks by hard constraints.
 
     Hard filter criteria:
-      ✗ artist in must_exclude_artists
+      ✗ library not in the brand's selected libraries
       ✗ genre matches must_exclude_genres
       ✗ tempo_bpm outside [tempo_min, tempo_max]
       ✗ energy   outside [energy_min ± relax, energy_max ± relax]
       ✗ valence  outside [valence_min ± relax, valence_max ± relax]
       ✗ explicit proxy (when filter_explicit=True)
     """
-    exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
     exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit = inputs.get("filter_explicit", True)
     song_type       = inputs.get("include_song_types", "all")
@@ -97,14 +104,11 @@ def _apply_hard_filters(
 
     filtered = []
     for track in candidates:
-        artist = (track.get("artist") or "").lower()
         genre  = _norm_genre(track.get("genre"))
         tempo  = float(track.get("tempo_bpm", 120))
         energy = float(track.get("energy",    0.5))
         valence = float(track.get("valence",  0.5))
 
-        if any(ea.lower() in artist for ea in exclude_artists if ea):
-            continue
         if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
         if not (tempo_min <= tempo <= tempo_max):
@@ -128,20 +132,16 @@ def _apply_exclusion_filters_only(
     inputs:     dict,
 ) -> list[dict]:
     """
-    Fallback filter: only apply artist/genre exclusions and explicit proxy.
+    Fallback filter: only apply genre exclusions and explicit proxy.
     No energy/valence/tempo bounds — used when hard filters leave 0 candidates.
     """
-    exclude_artists = _normalise_list(inputs.get("exclude_artists", ""))
     exclude_genres  = _normalise_list(inputs.get("exclude_genres", ""))
     filter_explicit = inputs.get("filter_explicit", True)
     song_type       = inputs.get("include_song_types", "all")
 
     filtered = []
     for track in candidates:
-        artist = (track.get("artist") or "").lower()
         genre  = _norm_genre(track.get("genre"))
-        if any(ea.lower() in artist for ea in exclude_artists if ea):
-            continue
         if any(_norm_genre(eg) in genre for eg in exclude_genres if eg):
             continue
         if filter_explicit and _is_explicit_proxy(track):
@@ -167,36 +167,12 @@ def _normalise_list(raw: Union[str, list]) -> list[str]:
 # ─── Analysis features (clap_audio_512, mood, arousal) ───────────────────────
 
 def _fetch_analysis_features(song_ids: list[str], include_maest: bool = False) -> dict[str, dict]:
-    """Fetch CLAP, mood, and arousal from analysis_song_features.
+    """Fetch CLAP / MAEST vectors for the given song ids.
 
     Pass include_maest=True only for the song replacement / suggest-similar path.
     Playlist generation does not need MAEST vectors.
     """
-    if not song_ids:
-        return {}
-    # analysis_song_features only has clap_audio_512 and maest_audio_768
-    # arousal and mood_predicted_labels come from the songs table via fetch_all_songs()
-    cols = "song_id,clap_audio_512"
-    if include_maest:
-        cols = "song_id,maest_audio_768,clap_audio_512"
-    client = get_supabase()
-    features: dict[str, dict] = {}
-    batch_size = 500
-    for i in range(0, len(song_ids), batch_size):
-        batch = song_ids[i : i + batch_size]
-        rows = (
-            client.table("analysis_song_features")
-            .select(cols)
-            .in_("song_id", batch)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            features[str(row["song_id"])] = {
-                "maest_audio_768": row.get("maest_audio_768"),
-                "clap_audio_512":  row.get("clap_audio_512"),
-            }
-    return features
+    return fetch_analysis_features(song_ids, include_maest=include_maest)
 
 
 def _attach_analysis_features(songs: list[dict], features: dict[str, dict]) -> None:
@@ -317,9 +293,31 @@ def _apply_music_notes_constraints(songs: list[dict], constraints: dict) -> list
 
 # ─── Main retriever ───────────────────────────────────────────────────────────
 
-# Top N songs passed to MMR per day-part (sorted by relevance).
-# 5 day-parts × 75 tracks = 375 max needed; 1200 gives comfortable headroom.
-MAX_CANDIDATES = 1200
+# Soft headroom only. Default 0 = score the entire playable catalog with MMR.
+# Set MAX_CANDIDATES>0 only if you intentionally want a smaller pool.
+MAX_CANDIDATES = int(os.getenv("MAX_CANDIDATES", "0") or 0)
+
+
+def preferred_genres(day_part_params: dict, inputs: dict, brand_profile: dict | None = None) -> list[str]:
+    """Collect brand/day-part preferred genres for soft relevance boosting."""
+    preferred: list[str] = []
+    preferred.extend(_normalise_list(day_part_params.get("genre_emphasis", [])))
+    preferred.extend(_normalise_list(inputs.get("include_genres", "")))
+    if brand_profile:
+        sb = brand_profile.get("sound_board") or {}
+        preferred.extend(_normalise_list(sb.get("primary_genres", [])))
+        preferred.extend(_normalise_list(sb.get("secondary_genres", [])))
+        preferred.extend(_normalise_list(brand_profile.get("primary_genres", [])))
+        preferred.extend(_normalise_list(brand_profile.get("secondary_genres", [])))
+    # Preserve order, drop empties/dupes.
+    seen: set[str] = set()
+    out: list[str] = []
+    for g in preferred:
+        key = _norm_genre(g)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(g)
+    return out
 
 
 def retrieve_candidates(
@@ -338,12 +336,12 @@ def retrieve_candidates(
 
     Returns:
         (candidates, all_playable, stats_dict)
-        candidates   — top MAX_CANDIDATES by relevance, fresh tracks first
+        candidates   — full ranked playable pool (or top MAX_CANDIDATES if set)
         all_playable — full exclusion-filtered+playable catalog (spillover source)
-        stats_dict   — {'filtered_count': int, 'skipped': bool}
+        stats_dict   — {'filtered_count': int, 'skipped': bool, 'catalog_size': int}
     """
-    # 1. Fetch full catalog
-    all_songs = fetch_all_songs()
+    # 1. Fetch full catalog, restricted to the brand's selected libraries.
+    all_songs = fetch_all_songs(inputs.get("libraries") or None)
     for s in all_songs:
         if "song_id" not in s:
             s["song_id"] = s.get("id")
@@ -364,72 +362,82 @@ def retrieve_candidates(
         )
 
     if not all_playable:
-        return [], [], {"filtered_count": 0, "skipped": True}
+        return [], [], {"filtered_count": 0, "skipped": True, "catalog_size": 0}
 
-    # 3. Sort by relevance to this day-part; put fresh (unused) tracks first so
-    #    the MAX_CANDIDATES window is dominated by songs not yet in earlier day-parts.
-    all_playable.sort(key=lambda t: compute_relevance(t, day_part_params), reverse=True)
+    preferred = preferred_genres(day_part_params, inputs, brand_profile)
+
+    # 3. Rank the FULL catalog by brand/day-part relevance. Fresh (unused) tracks
+    #    stay ahead of already-used ones so later day-parts keep exploring.
+    all_playable.sort(
+        key=lambda t: compute_relevance(t, day_part_params, preferred_genres=preferred),
+        reverse=True,
+    )
     if used_song_ids:
         fresh = [t for t in all_playable if t.get("song_id") not in used_song_ids]
         stale = [t for t in all_playable if t.get("song_id") in used_song_ids]
-        candidates = (fresh + stale)[:MAX_CANDIDATES]
+        ranked = fresh + stale
     else:
-        candidates = all_playable[:MAX_CANDIDATES]
+        ranked = all_playable
 
-    # 4. Attach clap_audio_512, mood_predicted_labels, arousal to candidates.
-    song_ids = [str(t.get("song_id", t.get("id", ""))) for t in candidates]
-    analysis = _fetch_analysis_features(song_ids)
-    if analysis:
-        _attach_analysis_features(candidates, analysis)
-        logger.debug("Analysis features attached for %d/%d candidates", len(analysis), len(candidates))
+    if MAX_CANDIDATES > 0:
+        candidates = ranked[:MAX_CANDIDATES]
+    else:
+        candidates = ranked
 
-    return candidates, all_playable, {"filtered_count": len(candidates), "skipped": False}
+    # 4. Attach CLAP embeddings for the whole candidate pool (cached).
+    clap_map = fetch_all_clap_features()
+    attached = 0
+    for t in candidates:
+        sid = str(t.get("song_id", t.get("id", "")))
+        emb = clap_map.get(sid)
+        if emb:
+            t["clap_audio_512"] = emb
+            attached += 1
+    logger.info(
+        "Full-catalog retrieve: %d playable → %d candidates (CLAP attached %d, preferred genres=%s)",
+        len(all_playable),
+        len(candidates),
+        attached,
+        preferred or "none",
+    )
+
+    return candidates, all_playable, {
+        "filtered_count": len(candidates),
+        "skipped": False,
+        "catalog_size": len(all_playable),
+    }
 
 
 def fetch_must_include_tracks(
-    must_include_artists: list[str],
-    candidates:           list[dict],
-    target_count:         int,
+    must_include_libraries: list[str],
+    candidates:             list[dict],
+    target_count:           int,
 ) -> list[dict]:
     """
-    Pre-select tracks for must-include artists.
-    - First looks in candidates pool.
-    - Falls back to direct SQL query if artist not found.
-    - Capped at 15% of target playlist length.
+    Pre-select tracks from specific libraries (Amurco / Epic / Fabplay Originals).
 
-    Returns list of track dicts to be injected at head of final playlist.
+    The catalog has no artist dimension, so ``library`` is the grouping used for
+    must-include selection. Capped at 15% of target playlist length.
     """
+    if not must_include_libraries:
+        return []
+
     cap = max(1, int(target_count * 0.15))
     selected: list[dict] = []
 
-    for artist_name in must_include_artists:
-        if not artist_name.strip():
+    for library_name in must_include_libraries:
+        if not str(library_name).strip():
             continue
 
-        # Check candidates pool first
         matches = [
             t for t in candidates
-            if artist_name.lower() in (t.get("artist") or "").lower()
+            if (t.get("library") or "").lower() == str(library_name).strip().lower()
+            and _has_playable_audio(t)
         ]
-
-        # Keep only playable tracks from the candidate pool.
-        matches = [t for t in matches if _has_playable_audio(t)]
-
         if not matches:
-            # SQL fallback
-            sql_tracks = fetch_songs_by_artist(artist_name)
-            if not sql_tracks:
-                logger.warning("Must-include artist '%s' not found anywhere. Skipping.", artist_name)
-                continue
-            for t in sql_tracks:
-                t["similarity"] = 0.0   # no ANN similarity for SQL-fetched tracks
-                t["song_id"]    = t.get("song_id", t.get("id"))
-            matches = [t for t in sql_tracks if _has_playable_audio(t)]
-            if not matches:
-                logger.warning("Must-include artist '%s' has no playable URLs. Skipping.", artist_name)
-                continue
+            logger.warning("Must-include library '%s' has no playable tracks. Skipping.", library_name)
+            continue
 
-        # Take best 1–2 tracks per must-include artist
         selected.extend(matches[:2])
         if len(selected) >= cap:
             break
@@ -441,6 +449,7 @@ def fetch_must_include_genre_tracks(
     include_genres: list[str],
     candidates:     list[dict],
     target_count:   int,
+    libraries:      list[str] | None = None,
 ) -> list[dict]:
     """
     Pre-select tracks for must-include genres.
@@ -472,8 +481,8 @@ def fetch_must_include_genre_tracks(
         matches = [t for t in matches if _has_playable_audio(t)]
 
         if not matches:
-            # SQL fallback
-            sql_tracks = fetch_songs_by_genre(genre_name)
+            # SQL fallback, restricted to the brand's selected libraries.
+            sql_tracks = fetch_songs_by_genre(genre_name, libraries=libraries)
             if not sql_tracks:
                 logger.warning("Must-include genre '%s' not found anywhere. Skipping.", genre_name)
                 continue
