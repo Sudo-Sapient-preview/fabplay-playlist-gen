@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.0.20/500-italic.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.20/index.css">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="/static/posthog.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -217,7 +218,10 @@
     localStorage.removeItem('fabplay_refresh');
     localStorage.removeItem('fabplay_user');
     document.cookie = 'fabplay_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-
+    if (window.FabplayAnalytics) {
+      await window.FabplayAnalytics.init();
+      window.FabplayAnalytics.capture('login_page_viewed');
+    }
   },
 
   async getConfig() {
@@ -257,6 +261,13 @@
       localStorage.setItem('fabplay_refresh', data.refresh_token);
       localStorage.setItem('fabplay_user',    JSON.stringify(data.user));
       document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
+      if (window.FabplayAnalytics) {
+        const user = data.user || {};
+        window.FabplayAnalytics.identify(user.id || this.email, {
+          email: user.email || this.email
+        });
+        window.FabplayAnalytics.capture('user_signed_in', { method: 'password' });
+      }
       window.location.href = '/dashboard';
     } catch(e) {
       this.error = 'Connection error. Please try again.';
@@ -305,6 +316,15 @@
       localStorage.setItem('fabplay_refresh', data.refresh_token);
       localStorage.setItem('fabplay_user',    JSON.stringify(data.user));
       document.cookie = 'fabplay_session=1; path=/; SameSite=Strict';
+      if (window.FabplayAnalytics) {
+        const user = data.user || {};
+        window.FabplayAnalytics.identify(user.id || this.email, {
+          email: user.email || this.email,
+          full_name: this.fullName || undefined,
+          phone: this.phone || undefined
+        });
+        window.FabplayAnalytics.capture('user_signed_up', { method: 'password' });
+      }
       window.location.href = '/dashboard';
     } catch(e) {
       this.error = 'Connection error. Please try again.';

@@ -119,6 +119,11 @@ if not _songs_base:
 SONGS_BASE_URL = _songs_base
 SONGS_DIR = os.getenv("SONGS_DIR", str(BASE_DIR.parent / "songs"))
 
+# PostHog analytics (frontend key is also exposed via /api/config)
+POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
+POSTHOG_HOST = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com").strip().rstrip("/") or "https://us.i.posthog.com"
+POSTHOG_ENABLED = _env_bool("POSTHOG_ENABLED", bool(POSTHOG_API_KEY))
+
 USE_X_FORWARDED_HOST = _env_bool("DJANGO_USE_X_FORWARDED_HOST", not DEBUG)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True

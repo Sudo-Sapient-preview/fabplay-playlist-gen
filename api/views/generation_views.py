@@ -5,6 +5,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 logger = logging.getLogger(__name__)
 
+from api import analytics
 from api.auth import require_auth
 from api.services.ai_service import analyze_files, quick_analyze, scrape_website, music_recs_from_content
 from api.services.generation_service import (
@@ -126,6 +127,11 @@ def start_soundboard_view(request, brand_id: str):
     task_id, message, status = start_soundboard(brand_id)
     if not task_id:
         return err(message or "Could not start soundboard generation", status or 400)
+    analytics.capture(
+        request.user_data["id"],
+        "soundboard_generation_started",
+        {"brand_id": brand_id, "task_id": task_id},
+    )
     return ok({"task_id": task_id})
 
 
@@ -151,6 +157,17 @@ def start_generate_view(request, brand_id: str):
     )
     if not task_id:
         return err(message or "Could not start playlist generation", status or 400)
+    analytics.capture(
+        request.user_data["id"],
+        "playlist_generation_started",
+        {
+            "brand_id": brand_id,
+            "task_id": task_id,
+            "playlist_name": playlist_name,
+            "include_count": len(genre_overrides.get("include") or []),
+            "exclude_count": len(genre_overrides.get("exclude") or []),
+        },
+    )
     return ok({"task_id": task_id})
 
 

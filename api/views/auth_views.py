@@ -2,8 +2,10 @@ import json
 import os
 
 import httpx
+from django.conf import settings
 from django.views.decorators.http import require_GET, require_http_methods
 
+from api import analytics
 from api.auth import get_user_role, require_auth
 from api.utils import err, ok
 
@@ -19,6 +21,9 @@ def config(_request):
         {
             "supabase_url": SUPABASE_URL,
             "supabase_anon_key": SUPABASE_ANON_KEY,
+            "posthog_enabled": bool(getattr(settings, "POSTHOG_ENABLED", False)),
+            "posthog_key": getattr(settings, "POSTHOG_API_KEY", "") if getattr(settings, "POSTHOG_ENABLED", False) else "",
+            "posthog_host": getattr(settings, "POSTHOG_HOST", "https://us.i.posthog.com"),
         }
     )
 
@@ -85,7 +90,23 @@ def signup(request):
                 400,
             )
 
-        return ok(signin_response.json())
+        session = signin_response.json()
+        user = session.get("user") or {}
+        user_id = user.get("id") or email
+        analytics.identify(
+            user_id,
+            {
+                "email": user.get("email") or email,
+                "full_name": metadata.get("full_name") or None,
+                "phone": metadata.get("phone") or None,
+            },
+        )
+        analytics.capture(
+            user_id,
+            "user_signed_up",
+            {"email": user.get("email") or email, "method": "password"},
+        )
+        return ok(session)
 
 
 @require_GET

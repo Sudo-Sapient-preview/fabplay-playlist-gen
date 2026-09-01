@@ -178,6 +178,20 @@ return {
       this.brands = brands;
     } catch(e) { window.location.href = '/login'; return; }
 
+    if (window.FabplayAnalytics) {
+      await window.FabplayAnalytics.init();
+      if (this.currentUser?.id) {
+        window.FabplayAnalytics.identify(this.currentUser.id, {
+          email: this.currentUser.email || undefined,
+          role: this.currentRole || undefined
+        });
+      }
+      window.FabplayAnalytics.capture('dashboard_loaded', {
+        brand_count: this.brands.length,
+        role: this.currentRole || undefined
+      });
+    }
+
     this.player = new Audio();
     this._bindPlayer();
 
@@ -209,6 +223,12 @@ return {
     Promise.all([this.loadStats(), this.loadActivity(), this.loadCatalogStats(), this.loadCatalogGenres()]);
 
     this.$watch('page', async val => {
+      if (window.FabplayAnalytics) {
+        window.FabplayAnalytics.capture('page_viewed', {
+          page: val,
+          brand_id: this.curBrand?.id || undefined
+        });
+      }
       if(val==='soundboard'){
         if(this.curBrand && !this.curBrand.sound_board_result){
           await this.loadBrands();
@@ -583,6 +603,13 @@ return {
         this.uploadedFiles.forEach(f=>fd.append('files',f));
         await this.apiFetch('/api/brands/'+brand.id+'/assets',{method:'POST',body:fd});
       }
+      if (window.FabplayAnalytics) {
+        window.FabplayAnalytics.capture('brand_created', {
+          brand_id: brand.id,
+          brand_name: brand.brand_name,
+          category: brand.category
+        });
+      }
       await this.loadBrands();
       this.curBrand=brand;this.curPl=null;this._origRanges={};this._origTargets={};
       this.sbSongType=brand.include_song_types||'all';
@@ -611,6 +638,9 @@ return {
     this.genMode='soundboard';
     this.genTask={status:'pending',progress:0,log:['Analyzing Brand & Sound Board...'],error:null};
     this.showGen=true;
+    if (window.FabplayAnalytics) {
+      window.FabplayAnalytics.capture('soundboard_generation_started', { brand_id: id });
+    }
     try{
       const r=await this.apiFetch('/api/soundboard/'+id,{method:'POST'});
       if(!r||!r.ok)throw new Error('Failed');
@@ -721,6 +751,12 @@ return {
     this.genMode='playlist';
     this.genTask={status:'pending',progress:0,log:['Starting...'],error:null};
     this.showGen=true;
+    if (window.FabplayAnalytics) {
+      window.FabplayAnalytics.capture('playlist_generation_started', {
+        brand_id: id,
+        playlist_name: playlistName || undefined
+      });
+    }
     try{
       const body={genre_overrides:this.sbGenreOverrides};
       if(playlistName)body.playlist_name=playlistName;
@@ -825,6 +861,9 @@ return {
     if(!confirm('Delete "'+name+'"?'))return;
     try{
       await this.apiFetch('/api/brands/'+id,{method:'DELETE'});
+      if (window.FabplayAnalytics) {
+        window.FabplayAnalytics.capture('brand_deleted', { brand_id: id, brand_name: name });
+      }
       await this.loadBrands();await this.loadStats();
       if(this.curBrand?.id===id){this.curBrand=null;this.curPl=null;}
       this.page='playlists-home';
@@ -1669,6 +1708,10 @@ return {
   },
 
   logout() {
+    if (window.FabplayAnalytics) {
+      window.FabplayAnalytics.capture('user_signed_out');
+      window.FabplayAnalytics.reset();
+    }
     localStorage.clear();
     document.cookie = 'fabplay_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.location.href = '/login';

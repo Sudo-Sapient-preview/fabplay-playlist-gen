@@ -2,6 +2,7 @@ import json
 
 from django.views.decorators.http import require_GET, require_http_methods
 
+from api import analytics
 from api.auth import require_auth
 from api.services.brand_service import (
     create_brand,
@@ -36,6 +37,16 @@ def brands_collection(request):
     brand, service_error = create_brand(request.user_data["id"], payload or {})
     if service_error:
         return err(service_error, 400)
+    user_id = request.user_data["id"]
+    analytics.capture(
+        user_id,
+        "brand_created",
+        {
+            "brand_id": brand.get("id") if isinstance(brand, dict) else None,
+            "brand_name": (brand or {}).get("brand_name") if isinstance(brand, dict) else None,
+            "category": (brand or {}).get("category") if isinstance(brand, dict) else None,
+        },
+    )
     return ok(brand)
 
 
@@ -45,6 +56,11 @@ def delete_brand_view(request, brand_id: str):
     success, message, status = delete_brand(brand_id, request.user_data["id"])
     if not success:
         return err(message or "Delete failed", status or 400)
+    analytics.capture(
+        request.user_data["id"],
+        "brand_deleted",
+        {"brand_id": brand_id},
+    )
     return ok({"ok": True})
 
 

@@ -302,5 +302,13 @@
   </div>
 </footer>
 
+<script src="/static/posthog.js"></script>
+<script>
+  if (window.FabplayAnalytics) {
+    window.FabplayAnalytics.init().then(function () {
+      window.FabplayAnalytics.capture('landing_page_viewed');
+    });
+  }
+</script>
 </body>
 </html>
